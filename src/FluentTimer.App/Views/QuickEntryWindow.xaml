@@ -1,0 +1,36 @@
+<Window
+    x:Class="FluentTimer.App.Views.QuickEntryWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    xmlns:ui="http://schemas.lepo.co/wpfui/2022/xaml"
+    Title="Fluent Timer quick entry"
+    WindowStyle="None"
+    AllowsTransparency="True"
+    Background="Transparent"
+    Topmost="True"
+    ShowInTaskbar="False"
+    ResizeMode="NoResize"
+    SizeToContent="Height"
+    Width="560"
+    WindowStartupLocation="Manual"
+    FontFamily="{StaticResource UiFont}">
+    <Border Margin="20" Padding="12" Background="{DynamicResource ContentBackgroundBrush}"
+            BorderBrush="{DynamicResource OverlayAccentBrush}" BorderThickness="1" CornerRadius="8">
+        <Border.Effect>
+            <DropShadowEffect BlurRadius="24" ShadowDepth="3" Opacity="0.45" />
+        </Border.Effect>
+        <StackPanel>
+            <ui:TextBox x:Name="Input" FontSize="16" Padding="10,8"
+                        PlaceholderText="25m  ·  Tea 4m  ·  1h30 deep work  ·  at 14:30 lunch  ·  pomo"
+                        TextChanged="OnTextChanged" PreviewKeyDown="OnInputKeyDown">
+                <ui:TextBox.Icon>
+                    <ui:SymbolIcon Symbol="Timer24" />
+                </ui:TextBox.Icon>
+            </ui:TextBox>
+            <Grid Margin="2,10,2,0">
+                <TextBlock x:Name="Preview" Style="{StaticResource MutedText}" Text="Type a duration, a time, or 'pomo'. Enter to start, Esc to close." />
+            </Grid>
+            <WrapPanel x:Name="Presets" Margin="0,10,0,0" />
+        </StackPanel>
+    </Border>
+</Window>

@@ -1,0 +1,123 @@
+<Window
+    x:Class="FluentTimer.App.Views.PillWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+    Title="Fluent Timer widget"
+    WindowStyle="None"
+    AllowsTransparency="True"
+    Background="Transparent"
+    Topmost="True"
+    ShowInTaskbar="False"
+    ShowActivated="False"
+    ResizeMode="NoResize"
+    SizeToContent="WidthAndHeight"
+    FontFamily="{StaticResource UiFont}"
+    UseLayoutRounding="True">
+
+    <!-- Transparent margin is headroom for grow/glow animations; it is click-through. -->
+    <Grid x:Name="Outer" Margin="60,32">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Expanded list (moved above or below the pill depending on screen position) -->
+        <Border x:Name="ListPanel" Grid.Row="2" Visibility="Collapsed" Margin="0,8" MinWidth="260"
+                Background="{DynamicResource PillBackgroundBrush}" BorderBrush="{DynamicResource PillBorderBrush}"
+                BorderThickness="1" CornerRadius="8" Padding="6">
+            <Border.Effect>
+                <DropShadowEffect BlurRadius="18" ShadowDepth="2" Opacity="0.35" />
+            </Border.Effect>
+            <StackPanel>
+                <ItemsControl x:Name="TimerList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Margin="4,2" Height="34">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="{Binding Label}" Style="{StaticResource BodyText}" TextTrimming="CharacterEllipsis" MaxWidth="150" Margin="6,0,10,0" />
+                                <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
+                                           Foreground="{DynamicResource OverlayForegroundBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
+                                <Button Grid.Column="2" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="12"
+                                        Content="{Binding PauseGlyph}" ToolTip="{Binding PauseText}" Tag="{Binding Id}" Click="OnPauseItem" />
+                                <Button Grid.Column="3" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="11"
+                                        Content="&#xE711;" ToolTip="Cancel" Tag="{Binding Id}" Click="OnCancelItem" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+                <Grid Margin="4,4,4,2">
+                    <Button Style="{StaticResource ChipButton}" Padding="10,4" HorizontalAlignment="Left" Click="OnNew">
+                        <StackPanel Orientation="Horizontal">
+                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE710;" FontSize="11" Margin="0,0,6,0" />
+                            <TextBlock Text="New timer" FontSize="12" />
+                        </StackPanel>
+                    </Button>
+                    <Button Style="{StaticResource ChipButton}" Padding="10,4" HorizontalAlignment="Right" Click="OnOpen">
+                        <TextBlock Text="Open" FontSize="12" />
+                    </Button>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <!-- The pill -->
+        <Border x:Name="Pill" Grid.Row="1" HorizontalAlignment="Left" CornerRadius="15" MinHeight="10"
+                Background="{DynamicResource PillBackgroundBrush}" BorderBrush="{DynamicResource PillBorderBrush}"
+                BorderThickness="1" RenderTransformOrigin="0.5,0.5" Cursor="Hand"
+                MouseLeftButtonDown="OnPillMouseDown" MouseRightButtonUp="OnPillRightClick">
+            <Border.RenderTransform>
+                <ScaleTransform x:Name="PillScale" />
+            </Border.RenderTransform>
+            <Border.Effect>
+                <DropShadowEffect x:Name="PillGlow" BlurRadius="10" ShadowDepth="1" Opacity="0.3" Color="Black" />
+            </Border.Effect>
+            <Grid>
+                <Border x:Name="FlashLayer" CornerRadius="15" Background="{DynamicResource AlertBrush}" Opacity="0" />
+
+                <!-- Idle: a slim bar, like Wispr Flow's resting state -->
+                <Border x:Name="IdleBar" Width="44" Height="8" />
+
+                <!-- Idle + hover -->
+                <StackPanel x:Name="IdleHover" Orientation="Horizontal" Margin="12,0" Height="30" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE710;" FontSize="11" Foreground="{DynamicResource OverlayForegroundBrush}" Margin="0,0,8,0" />
+                    <TextBlock Text="New timer" Style="{StaticResource BodyText}" FontSize="12" />
+                    <TextBlock x:Name="IdleHotkey" Style="{StaticResource MutedText}" FontSize="11" Margin="8,0,0,0" />
+                </StackPanel>
+
+                <!-- Running -->
+                <StackPanel x:Name="TimerContent" Orientation="Horizontal" Margin="11,0,12,0" Height="30" Visibility="Collapsed">
+                    <Grid Width="12" Margin="0,0,8,0">
+                        <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource OverlayAccentBrush}" />
+                        <TextBlock x:Name="PausedGlyph" Style="{StaticResource Glyph}" Text="&#xE769;" FontSize="10"
+                                   Foreground="{DynamicResource NoResultsForeground}" Visibility="Collapsed" />
+                    </Grid>
+                    <TextBlock x:Name="PillTime" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
+                               Foreground="{DynamicResource OverlayForegroundBrush}" VerticalAlignment="Center" />
+                    <TextBlock x:Name="PillLabel" Style="{StaticResource MutedText}" MaxWidth="170" TextTrimming="CharacterEllipsis"
+                               TextWrapping="NoWrap" Margin="8,0,0,0" Visibility="Collapsed" />
+                    <Border x:Name="Badge" CornerRadius="4" Background="{DynamicResource TabActiveBackground}" Padding="5,1" Margin="8,0,0,0"
+                            VerticalAlignment="Center" Visibility="Collapsed">
+                        <TextBlock x:Name="BadgeText" FontSize="11" Foreground="{DynamicResource OverlayForegroundBrush}" />
+                    </Border>
+                </StackPanel>
+
+                <!-- Alerting -->
+                <StackPanel x:Name="AlertContent" Orientation="Horizontal" Margin="12,0,6,0" Height="34" Visibility="Collapsed">
+                    <TextBlock Style="{StaticResource Glyph}" Text="&#xEA8F;" Foreground="White" Margin="0,0,8,0" />
+                    <TextBlock x:Name="AlertTitle" FontWeight="SemiBold" FontSize="13" Foreground="White" VerticalAlignment="Center"
+                               MaxWidth="180" TextTrimming="CharacterEllipsis" />
+                    <TextBlock x:Name="AlertMessage" FontSize="12" Foreground="#E6FFFFFF" VerticalAlignment="Center" Margin="8,0,10,0"
+                               MaxWidth="180" TextTrimming="CharacterEllipsis" />
+                    <Button x:Name="AlertAction" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnAlertAction" />
+                    <Button x:Name="SnoozeButton" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnSnooze" />
+                    <Button Style="{StaticResource ChipButton}" Padding="8,2" FontSize="12" Content="Dismiss" Click="OnDismiss" />
+                </StackPanel>
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

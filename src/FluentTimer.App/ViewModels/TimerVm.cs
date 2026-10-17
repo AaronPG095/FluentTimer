@@ -1,0 +1,71 @@
+using CommunityToolkit.Mvvm.ComponentModel;
+using FluentTimer.Core;
+
+namespace FluentTimer.App.ViewModels;
+
+/// <summary>Live view of one <see cref="TimerItem"/>, refreshed on every engine tick.</summary>
+public sealed class TimerVm : ObservableObject
+{
+    private string _label = "";
+    private string _subtitle = "";
+    private string _timeText = "";
+    private double _progress;
+    private TimerState _state;
+
+    public TimerVm(TimerItem model) => Model = model;
+
+    public TimerItem Model { get; }
+    public Guid Id => Model.Id;
+    public bool IsPomodoro => Model.Kind == TimerKind.Pomodoro;
+    public bool IsBreak => Model.Kind == TimerKind.Break;
+
+    public string Label { get => _label; private set => SetProperty(ref _label, value); }
+    public string Subtitle { get => _subtitle; private set => SetProperty(ref _subtitle, value); }
+    public string TimeText { get => _timeText; private set => SetProperty(ref _timeText, value); }
+    public double Progress { get => _progress; private set => SetProperty(ref _progress, value); }
+
+    public TimerState State
+    {
+        get => _state;
+        private set
+        {
+            if (!SetProperty(ref _state, value)) return;
+            OnPropertyChanged(nameof(IsRunning));
+            OnPropertyChanged(nameof(IsPaused));
+            OnPropertyChanged(nameof(IsRinging));
+            OnPropertyChanged(nameof(PauseGlyph));
+            OnPropertyChanged(nameof(PauseText));
+        }
+    }
+
+    public bool IsRunning => State == TimerState.Running;
+    public bool IsPaused => State == TimerState.Paused;
+    public bool IsRinging => State == TimerState.Ringing;
+
+    /// <summary>Segoe Fluent Icons: Pause / Play.</summary>
+    public string PauseGlyph => IsRunning ? "" : "";
+    public string PauseText => IsRunning ? "Pause" : (IsPomodoro && Model.PausedRemaining == Model.Duration ? "Start" : "Resume");
+
+    /// <summary>Sort key: ringing first, then soonest running, then paused.</summary>
+    public (int, TimeSpan) SortKey(DateTime now) => (State switch
+    {
+        TimerState.Ringing => 0,
+        TimerState.Running => 1,
+        _ => 2,
+    }, Model.Remaining(now));
+
+    public void Update(DateTime utcNow)
+    {
+        State = Model.State;
+        Label = Model.DisplayLabel;
+        TimeText = TimeFormat.Countdown(Model.Remaining(utcNow));
+        Progress = Model.Progress(utcNow);
+        Subtitle = Model.Kind switch
+        {
+            TimerKind.Pomodoro => $"Session {Model.CompletedWorkSessions + (Model.Phase == PomodoroPhase.Work ? 1 : 0)} · {TimeFormat.Friendly(Model.Duration)}",
+            TimerKind.Break => $"Break · {TimeFormat.Friendly(Model.Duration)}",
+            _ => IsRinging ? "Time's up" : TimeFormat.Friendly(Model.Duration),
+        };
+        if (IsPaused) Subtitle += " · paused";
+    }
+}
