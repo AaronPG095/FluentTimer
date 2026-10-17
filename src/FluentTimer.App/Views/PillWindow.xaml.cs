@@ -240,6 +240,7 @@ public partial class PillWindow : Window
         AlertMessage.Text = alert.Request.Message;
         SnoozeButton.Content = $"+{_host.Settings.SnoozeMinutes} min";
         SnoozeButton.Visibility = alert.CanSnooze ? Visibility.Visible : Visibility.Collapsed;
+        DismissButton.Content = alert.Request.Repeats ? "Next round" : "Dismiss"; // click restarts a repeating timer
         var startFocus = StartFocusTarget(alert) is not null;
         AlertAction.Content = "Start focus";
         AlertAction.Visibility = startFocus ? Visibility.Visible : Visibility.Collapsed;

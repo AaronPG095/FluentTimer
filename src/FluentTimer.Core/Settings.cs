@@ -51,6 +51,9 @@ public sealed class AppSettings
     public PillSettings Pill { get; set; } = new();
     public List<int> PresetMinutes { get; set; } = [5, 10, 25, 60];
     public int SnoozeMinutes { get; set; } = 5;
+
+    /// <summary>New countdowns start with Repeat on: dismissing the finished timer restarts it.</summary>
+    public bool RepeatByDefault { get; set; }
     public bool QuietWhenFullscreen { get; set; } = true;
     public int IdleMinutes { get; set; } = 5;
     public bool FirstRunDone { get; set; }

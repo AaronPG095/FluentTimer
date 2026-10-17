@@ -17,6 +17,19 @@ public sealed class TimerVm : ObservableObject
     public TimerItem Model { get; }
     public Guid Id => Model.Id;
     public bool IsPomodoro => Model.Kind == TimerKind.Pomodoro;
+    public bool IsCountdown => Model.Kind == TimerKind.Countdown;
+
+    private bool _repeat;
+    /// <summary>Two-way: the toggle writes through the engine.</summary>
+    public bool Repeat
+    {
+        get => _repeat;
+        set
+        {
+            if (!SetProperty(ref _repeat, value)) return;
+            Services.AppHost.Current.Act(e => e.SetRepeat(Id, value));
+        }
+    }
     public bool IsBreak => Model.Kind == TimerKind.Break;
 
     public string Label { get => _label; private set => SetProperty(ref _label, value); }
@@ -57,6 +70,7 @@ public sealed class TimerVm : ObservableObject
     public void Update(DateTime utcNow)
     {
         State = Model.State;
+        if (_repeat != Model.Repeat) { _repeat = Model.Repeat; OnPropertyChanged(nameof(Repeat)); }
         Label = Model.DisplayLabel;
         TimeText = TimeFormat.Countdown(Model.Remaining(utcNow));
         Progress = Model.Progress(utcNow);
@@ -66,6 +80,7 @@ public sealed class TimerVm : ObservableObject
             TimerKind.Break => $"Break · {TimeFormat.Friendly(Model.Duration)}",
             _ => IsRinging ? "Time's up" : TimeFormat.Friendly(Model.Duration),
         };
+        if (Model.Repeat) Subtitle += " · repeats";
         if (IsPaused) Subtitle += " · paused";
     }
 }

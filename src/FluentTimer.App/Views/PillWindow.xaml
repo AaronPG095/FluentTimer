@@ -46,6 +46,7 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <TextBlock Text="{Binding Label}" Style="{StaticResource BodyText}" TextTrimming="CharacterEllipsis" MaxWidth="150" Margin="6,0,10,0" />
                                 <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
@@ -55,7 +56,10 @@
                                         Tag="{Binding Id}" Click="OnPauseItem" />
                                 <Button Grid.Column="3" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="12"
                                         Content="&#xE72C;" ToolTip="Reset" AutomationProperties.Name="Reset" Tag="{Binding Id}" Click="OnResetItem" />
-                                <Button Grid.Column="4" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="11"
+                                <ToggleButton Grid.Column="4" Style="{StaticResource IconToggle}" Content="&#xE8EE;"
+                                              IsChecked="{Binding Repeat, Mode=TwoWay}" Visibility="{Binding IsCountdown, Converter={StaticResource BoolToVis}}"
+                                              ToolTip="Repeat: dismissing the finished timer starts it again" AutomationProperties.Name="Repeat" />
+                                <Button Grid.Column="5" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="11"
                                         Content="&#xE711;" ToolTip="Cancel" AutomationProperties.Name="Cancel" Tag="{Binding Id}" Click="OnCancelItem" />
                             </Grid>
                         </DataTemplate>
@@ -129,7 +133,7 @@
                     <Button x:Name="AlertAction" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnAlertAction" />
                     <Button x:Name="SnoozeButton" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnSnooze"
                             AutomationProperties.Name="Snooze" />
-                    <Button Style="{StaticResource ChipButton}" Padding="8,2" FontSize="12" Content="Dismiss" Click="OnDismiss" />
+                    <Button x:Name="DismissButton" Style="{StaticResource ChipButton}" Padding="8,2" FontSize="12" Content="Dismiss" Click="OnDismiss" />
                 </StackPanel>
             </Grid>
         </Border>

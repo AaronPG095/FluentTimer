@@ -117,9 +117,10 @@ internal sealed class AppHost : IDisposable
 
     // ---- Commands used by the UI ------------------------------------------------------------
 
-    public void StartCountdown(TimeSpan duration, string label = "")
+    /// <summary>repeat: null = use the "repeat new timers" setting.</summary>
+    public void StartCountdown(TimeSpan duration, string label = "", bool? repeat = null)
     {
-        Engine.StartCountdown(duration, label);
+        Engine.StartCountdown(duration, label, repeat: repeat);
         SyncTimers();
     }
 
@@ -148,8 +149,8 @@ internal sealed class AppHost : IDisposable
                 Restart(_saveState);
                 return $"Alarm set for {entry.Time:HH:mm}";
             default:
-                StartCountdown(entry.Duration, entry.Label);
-                return $"{TimeFormat.Friendly(entry.Duration)} timer started";
+                StartCountdown(entry.Duration, entry.Label, entry.Repeat ? true : null);
+                return $"{TimeFormat.Friendly(entry.Duration)} timer started{(entry.Repeat ? ", repeating" : "")}";
         }
     }
 
@@ -157,7 +158,7 @@ internal sealed class AppHost : IDisposable
     {
         QuickEntryKind.Pomodoro => $"Pomodoro{Suffix(e.Label)}",
         QuickEntryKind.Alarm => $"Alarm at {e.Time:HH:mm}{Suffix(e.Label)}",
-        _ => $"Timer {TimeFormat.Friendly(e.Duration)}{Suffix(e.Label)}",
+        _ => $"Timer {TimeFormat.Friendly(e.Duration)}{Suffix(e.Label)}{(e.Repeat ? " · repeats when dismissed" : "")}",
     };
 
     private static string Suffix(string label) => label.Length > 0 ? $" · {label}" : "";

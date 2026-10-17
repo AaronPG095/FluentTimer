@@ -40,7 +40,7 @@ public sealed class TimerEngine
 
     // ---- Countdowns -------------------------------------------------------------------------
 
-    public TimerItem StartCountdown(TimeSpan duration, string label = "", AlertSettings? alert = null)
+    public TimerItem StartCountdown(TimeSpan duration, string label = "", AlertSettings? alert = null, bool? repeat = null)
     {
         if (duration <= TimeSpan.Zero) throw new ArgumentOutOfRangeException(nameof(duration));
         var timer = new TimerItem
@@ -48,6 +48,7 @@ public sealed class TimerEngine
             Kind = TimerKind.Countdown,
             Label = label.Trim(),
             AlertOverride = alert,
+            Repeat = repeat ?? Settings.RepeatByDefault,
         };
         Run(timer, duration);
         State.Timers.Add(timer);
@@ -141,12 +142,21 @@ public sealed class TimerEngine
 
     // ---- Alert responses ----------------------------------------------------------------------
 
+    public void SetRepeat(Guid id, bool repeat)
+    {
+        if (Find(id) is not { Kind: TimerKind.Countdown } t || t.Repeat == repeat) return;
+        t.Repeat = repeat;
+        Changed?.Invoke();
+    }
+
+    /// <summary>Acknowledge a finished timer: it is logged, then removed, or restarted if it repeats.</summary>
     public void Dismiss(AlertRequest alert)
     {
         if (alert.Kind == AlertKind.TimerDone && alert.TimerId is { } id && Find(id) is { State: TimerState.Ringing } t)
         {
             Log(t, t.Duration, completed: true);
-            State.Timers.Remove(t);
+            if (t.Repeat) Run(t, t.InitialDuration > TimeSpan.Zero ? t.InitialDuration : t.Duration);
+            else State.Timers.Remove(t);
             Changed?.Invoke();
         }
     }
@@ -165,7 +175,7 @@ public sealed class TimerEngine
                 r.NextDueUtc = Now + snooze;
                 break;
             case AlertKind.Alarm:
-                StartCountdown(snooze, alert.Title, alert.Settings);
+                StartCountdown(snooze, alert.Title, alert.Settings, repeat: false); // a snooze never loops
                 return;
             default:
                 Dismiss(alert);
@@ -384,7 +394,12 @@ public sealed class TimerEngine
     }
 
     private AlertRequest TimerDoneAlert(TimerItem t) =>
-        new(AlertKind.TimerDone, t.DisplayLabel, $"{TimeFormat.Friendly(t.Duration)} is up", t.AlertOverride ?? Settings.DefaultAlert, t.Id);
+        new(AlertKind.TimerDone, t.DisplayLabel,
+            t.Repeat
+                ? $"{TimeFormat.Friendly(t.Duration)} is up · click to go again"
+                : $"{TimeFormat.Friendly(t.Duration)} is up",
+            t.AlertOverride ?? Settings.DefaultAlert, t.Id)
+        { Repeats = t.Repeat };
 
     private void Log(TimerItem t, TimeSpan duration, bool completed) =>
         SessionLogged?.Invoke(new SessionRecord

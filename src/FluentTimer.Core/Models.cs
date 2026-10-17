@@ -28,6 +28,9 @@ public sealed class TimerItem
     public PomodoroPhase Phase { get; set; }
     public int CompletedWorkSessions { get; set; }
 
+    /// <summary>Countdowns only: dismissing the finished timer starts it again from its original length.</summary>
+    public bool Repeat { get; set; }
+
     /// <summary>For breaks started by an interval reminder.</summary>
     public Guid? ReminderId { get; set; }
 
@@ -148,5 +151,9 @@ public sealed record AlertRequest(
     Guid? SourceId = null)
 {
     public Guid Id { get; } = Guid.NewGuid();
+
+    /// <summary>A finished repeating timer: dismissing it starts the next round.</summary>
+    public bool Repeats { get; init; }
+
     public bool CanSnooze => Kind is AlertKind.TimerDone or AlertKind.Reminder or AlertKind.Alarm;
 }

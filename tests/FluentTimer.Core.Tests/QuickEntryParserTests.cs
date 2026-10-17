@@ -54,6 +54,29 @@ public class QuickEntryParserTests
     }
 
     [Theory]
+    [InlineData("1h repeat", 60 * 60, "")]
+    [InlineData("repeat 1h deep work", 60 * 60, "deep work")]
+    [InlineData("Stretch 45m loop", 45 * 60, "Stretch")]
+    public void Parses_repeat_keyword(string input, int seconds, string label)
+    {
+        Assert.True(QuickEntryParser.TryParse(input, out var e));
+        Assert.True(e.Repeat);
+        Assert.Equal(TimeSpan.FromSeconds(seconds), e.Duration);
+        Assert.Equal(label, e.Label);
+    }
+
+    [Fact]
+    public void Repeat_needs_a_word_boundary_and_a_countdown()
+    {
+        Assert.True(QuickEntryParser.TryParse("Repeaters 10m", out var e));
+        Assert.False(e.Repeat);
+        Assert.Equal("Repeaters", e.Label);
+        Assert.True(QuickEntryParser.TryParse("at 14:00 repeat", out var alarm));
+        Assert.False(alarm.Repeat); // alarms repeat by weekday instead
+        Assert.False(QuickEntryParser.TryParse("repeat", out _));
+    }
+
+    [Theory]
     [InlineData("")]
     [InlineData("   ")]
     [InlineData("hello")]

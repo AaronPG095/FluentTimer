@@ -5,7 +5,7 @@ namespace FluentTimer.Core;
 
 public enum QuickEntryKind { Countdown, Alarm, Pomodoro }
 
-public sealed record QuickEntry(QuickEntryKind Kind, TimeSpan Duration, TimeOnly Time, string Label);
+public sealed record QuickEntry(QuickEntryKind Kind, TimeSpan Duration, TimeOnly Time, string Label, bool Repeat = false);
 
 /// <summary>
 /// Parses quick-entry text such as "25m", "1h30 deep work", "Tea 4m", "90s", "5:00",
@@ -15,6 +15,9 @@ public sealed record QuickEntry(QuickEntryKind Kind, TimeSpan Duration, TimeOnly
 public static partial class QuickEntryParser
 {
     private const string End = @"(?=\s|$)";
+
+    [GeneratedRegex(@"(?<=^|\s)(?:repeat(?:ing)?|loop)(?=\s|$)", RegexOptions.IgnoreCase)]
+    private static partial Regex RepeatRx();
 
     [GeneratedRegex(@"^(?:pomo|pomodoro|focus)" + End, RegexOptions.IgnoreCase)]
     private static partial Regex PomodoroRx();
@@ -38,6 +41,9 @@ public static partial class QuickEntryParser
     {
         entry = null!;
         var text = Regex.Replace(input ?? "", @"\s+", " ").Trim();
+        // "repeat" / "loop" anywhere makes a countdown restart each time it's dismissed.
+        var repeat = RepeatRx().IsMatch(text);
+        if (repeat) text = Regex.Replace(RepeatRx().Replace(text, " "), @"\s+", " ").Trim();
         if (text.Length == 0) return false;
 
         // The time spec may appear anywhere ("Tea 4m" or "4m Tea"); try each word boundary.
@@ -55,7 +61,7 @@ public static partial class QuickEntryParser
                 continue;
             }
             var label = (text[..start] + " " + rest[length..]).Trim();
-            entry = new QuickEntry(kind, duration, time, label);
+            entry = new QuickEntry(kind, duration, time, label, repeat && kind == QuickEntryKind.Countdown);
             return true;
         }
         return false;

@@ -115,6 +115,7 @@ public sealed class SettingsVm : ObservableObject
     public bool FadeWhenAway { get => S.Pill.FadeWhenAway; set { S.Pill.FadeWhenAway = value; Save(); } }
     public bool VerticalOnSides { get => S.Pill.VerticalOnSides; set { S.Pill.VerticalOnSides = value; Save(); } }
     public bool QuietWhenFullscreen { get => S.QuietWhenFullscreen; set { S.QuietWhenFullscreen = value; Save(); } }
+    public bool RepeatByDefault { get => S.RepeatByDefault; set { S.RepeatByDefault = value; Save(); } }
     public double? SnoozeMinutes { get => S.SnoozeMinutes; set { if (value is >= 1) { S.SnoozeMinutes = (int)value; Save(); } } }
     public double? IdleMinutes { get => S.IdleMinutes; set { if (value is >= 1) { S.IdleMinutes = (int)value; Save(); } } }
 

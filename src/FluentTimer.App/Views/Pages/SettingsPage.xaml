@@ -85,6 +85,13 @@
                         <ui:TextBox HorizontalAlignment="Right" Width="200" Text="{Binding Presets}" />
                     </Grid>
                     <Grid Style="{StaticResource Row}">
+                        <StackPanel>
+                            <TextBlock Text="Repeat new timers" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="When a timer finishes, clicking it starts the same length again. Or add 'repeat', e.g. '1h repeat'" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding RepeatByDefault, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
                         <TextBlock Text="Snooze length (minutes)" Style="{StaticResource BodyText}" />
                         <ui:NumberBox HorizontalAlignment="Right" Width="140" Minimum="1" Maximum="120" MaxDecimalPlaces="0" Value="{Binding SnoozeMinutes, Mode=TwoWay}" />
                     </Grid>

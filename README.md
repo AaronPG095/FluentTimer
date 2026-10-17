@@ -4,7 +4,7 @@ A Windows timer that lives in your tray and starts with Windows. A small floatin
 
 ## Features
 
-- **Countdowns** with labels. Several can run at once.
+- **Countdowns** with labels. Several can run at once. Turn on **Repeat** (or type `1h repeat`) and clicking the finished timer starts the same length again.
 - **Pomodoro**: 25/5/15 with a long break every 4 sessions, all configurable. Breaks start automatically; you start each focus session yourself.
 - **Interval reminders** (stand up, eye breaks) with active hours and weekdays. They pause while the screen is locked or you're idle, and an optional break countdown dims the screen.
 - **Alarms**: one-off or repeating on chosen weekdays.

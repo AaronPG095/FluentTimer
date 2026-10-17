@@ -90,6 +90,52 @@ public class TimerEngineTests
     }
 
     [Fact]
+    public void Repeating_timer_restarts_full_length_when_dismissed()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartCountdown(60 * Min, "Deep work", repeat: true);
+        f.Engine.AddTime(t.Id, 5 * Min); // extra time applies to this round only
+        f.Advance(65 * Min);
+        var alert = Assert.Single(f.Alerts);
+        Assert.True(alert.Repeats);
+
+        f.Engine.Dismiss(alert);
+
+        Assert.Same(t, Assert.Single(f.State.Timers));
+        Assert.Equal(TimerState.Running, t.State);
+        Assert.Equal(60 * Min, t.Remaining(f.Clock.UtcNow));
+        Assert.Equal(65 * Min, Assert.Single(f.Sessions).Duration); // the finished round is tracked
+
+        f.Advance(60 * Min);
+        Assert.Equal(2, f.Alerts.Count); // and it rings again an hour later
+    }
+
+    [Fact]
+    public void Repeat_default_comes_from_settings_but_alarm_snoozes_never_repeat()
+    {
+        var f = new EngineFixture();
+        f.Settings.RepeatByDefault = true;
+        Assert.True(f.Engine.StartCountdown(10 * Min).Repeat);
+        Assert.False(f.Engine.StartCountdown(10 * Min, repeat: false).Repeat);
+
+        f.State.Alarms.Add(new Alarm { Label = "Lunch", Time = new TimeOnly(10, 1), Date = new DateOnly(2026, 10, 14) });
+        f.Advance(Min);
+        f.Engine.Snooze(f.Alerts[^1], 5 * Min);
+        Assert.False(f.State.Timers.Single(x => x.Label == "Lunch").Repeat);
+    }
+
+    [Fact]
+    public void Turning_repeat_off_while_ringing_removes_on_dismiss()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartCountdown(10 * Min, repeat: true);
+        f.Advance(10 * Min);
+        f.Engine.SetRepeat(t.Id, false);
+        f.Engine.Dismiss(f.Alerts[0]);
+        Assert.Empty(f.State.Timers);
+    }
+
+    [Fact]
     public void Cancel_logs_partial_session()
     {
         var f = new EngineFixture();

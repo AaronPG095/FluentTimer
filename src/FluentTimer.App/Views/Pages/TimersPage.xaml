@@ -15,7 +15,7 @@
                             <ColumnDefinition Width="Auto" />
                         </Grid.ColumnDefinitions>
                         <ui:TextBox x:Name="Quick" FontSize="14"
-                                    PlaceholderText="25m  ·  Tea 4m  ·  1h30 deep work  ·  at 14:30 lunch  ·  pomo writing"
+                                    PlaceholderText="25m  ·  Tea 4m  ·  1h repeat  ·  at 14:30 lunch  ·  pomo writing"
                                     TextChanged="OnQuickChanged" KeyDown="OnQuickKeyDown" />
                         <Button Grid.Column="1" Style="{StaticResource AccentButton}" Margin="8,0,0,0" Padding="18,6" Click="OnQuickStart">
                             <StackPanel Orientation="Horizontal">
@@ -69,6 +69,14 @@
                                             <TextBlock Text="Reset" />
                                         </StackPanel>
                                     </Button>
+                                    <ToggleButton x:Name="RepeatToggle" Style="{StaticResource ChipToggle}" Margin="0,0,6,0" Visibility="Collapsed"
+                                                  IsChecked="{Binding Repeat, Mode=TwoWay}" AutomationProperties.Name="Repeat"
+                                                  ToolTip="When on, dismissing the finished timer starts it again">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE8EE;" FontSize="12" Margin="0,0,6,0" />
+                                            <TextBlock Text="Repeat" />
+                                        </StackPanel>
+                                    </ToggleButton>
                                     <Button Style="{StaticResource ChipButton}" Content="+1 min" Margin="0,0,6,0" Tag="{Binding Id}" Click="OnAdd1" />
                                     <Button Style="{StaticResource ChipButton}" Content="+5 min" Margin="0,0,6,0" Tag="{Binding Id}" Click="OnAdd5" />
                                     <Button x:Name="Skip" Style="{StaticResource IconButton}" Content="&#xE893;" ToolTip="Skip to next phase"
@@ -80,6 +88,9 @@
                         <DataTemplate.Triggers>
                             <DataTrigger Binding="{Binding IsPomodoro}" Value="True">
                                 <Setter TargetName="Skip" Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsCountdown}" Value="True">
+                                <Setter TargetName="RepeatToggle" Property="Visibility" Value="Visible" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsRinging}" Value="True">
                                 <Setter TargetName="Time" Property="Foreground" Value="{DynamicResource AlertBrush}" />

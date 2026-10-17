@@ -27,7 +27,7 @@ public partial class DimOverlayWindow : Window
         MessageText.Text = alert.Request.Message;
         SnoozeButton.Content = $"Snooze {_host.Settings.SnoozeMinutes} min";
         SnoozeButton.Visibility = alert.CanSnooze ? Visibility.Visible : Visibility.Collapsed;
-        DismissButton.Content = IsBreak ? "Skip break" : "Dismiss";
+        DismissButton.Content = IsBreak ? "Skip break" : alert.Request.Repeats ? "Start next round" : "Dismiss";
 
         KeyDown += (_, e) => { if (e.Key == Key.Escape) OnDismiss(this, e); };
         Loaded += (_, _) =>
