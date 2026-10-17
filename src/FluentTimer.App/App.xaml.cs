@@ -34,6 +34,11 @@ public partial class App : Application
         _host.Hotkey.Pressed += ShowQuickEntry;
         _host.Start();
 
+        // Create (not show) the real main window first: WPF makes the first window created Application.MainWindow,
+        // and WPF-UI's theme manager restyles MainWindow — which breaks the widget's transparency if it's the widget.
+        _main = new MainWindow(_host);
+        MainWindow = _main;
+
         _tray = new TrayService(_host);
         _pill = new PillWindow(_host);
         _pill.UpdateVisibility();
@@ -43,6 +48,14 @@ public partial class App : Application
         {
             ShowMain(devPage);
             return;
+        }
+
+        // Dev aid: FLUENTTIMER_SELFTEST=reapply re-applies settings after 3 s, like dropping the widget does.
+        if (AppPaths.IsDev && Environment.GetEnvironmentVariable("FLUENTTIMER_SELFTEST") == "reapply")
+        {
+            var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+            t.Tick += (_, _) => { t.Stop(); _host.SettingsChanged(); };
+            t.Start();
         }
 
         var launchedAtLogin = e.Args.Contains(StartupRegistration.MinimizedArg);
@@ -57,11 +70,7 @@ public partial class App : Application
     public void ShowMain(string? page = null)
     {
         if (_host is null) return;
-        if (_main is null)
-        {
-            _main = new MainWindow(_host);
-            MainWindow = _main; // otherwise WPF treats the first window created (the pill) as the main window
-        }
+        _main ??= new MainWindow(_host);
         if (page is not null) _main.Navigate(page);
         _main.Show();
         if (_main.WindowState == WindowState.Minimized) _main.WindowState = WindowState.Normal;

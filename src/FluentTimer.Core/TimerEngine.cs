@@ -115,6 +115,22 @@ public sealed class TimerEngine
         Changed?.Invoke();
     }
 
+    /// <summary>Restart from the original length (ignoring added time and snoozes) and keep it running.</summary>
+    public void Reset(Guid id)
+    {
+        if (Find(id) is not { } t) return;
+        var tracked = t.Kind == TimerKind.Countdown || t.Kind == TimerKind.Pomodoro && t.Phase == PomodoroPhase.Work;
+        var ran = t.Duration - t.Remaining(Now);
+        if (tracked && ran >= TimeSpan.FromSeconds(30)) Log(t, ran, completed: false);
+
+        var length = t.Kind == TimerKind.Pomodoro
+            ? Settings.Pomodoro.PhaseLength(t.Phase)
+            : t.InitialDuration > TimeSpan.Zero ? t.InitialDuration : t.Duration;
+        Run(t, length);
+        TimerAlertsCleared?.Invoke(t.Id); // a ringing timer that is reset no longer needs its alert
+        Changed?.Invoke();
+    }
+
     /// <summary>Skip the rest of the current Pomodoro phase and move to the next one.</summary>
     public void SkipPhase(Guid id)
     {
@@ -351,6 +367,7 @@ public sealed class TimerEngine
     private void Run(TimerItem t, TimeSpan length)
     {
         t.Duration = length;
+        t.InitialDuration = length;
         t.StartedAtUtc = Now;
         t.EndsAtUtc = Now + length;
         t.PausedRemaining = null;
@@ -360,6 +377,7 @@ public sealed class TimerEngine
     private static void Wait(TimerItem t, TimeSpan length)
     {
         t.Duration = length;
+        t.InitialDuration = length;
         t.EndsAtUtc = null;
         t.PausedRemaining = length;
         t.State = TimerState.Paused;

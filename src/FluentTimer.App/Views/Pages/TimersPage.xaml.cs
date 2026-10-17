@@ -70,6 +70,7 @@ public partial class TimersPage : UserControl
     private static Guid Id(object sender) => (Guid)((FrameworkElement)sender).Tag;
 
     private void OnPause(object sender, RoutedEventArgs e) => _host.Act(en => en.TogglePause(Id(sender)));
+    private void OnReset(object sender, RoutedEventArgs e) => _host.Act(en => en.Reset(Id(sender)));
     private void OnAdd1(object sender, RoutedEventArgs e) => _host.Act(en => en.AddTime(Id(sender), TimeSpan.FromMinutes(1)));
     private void OnAdd5(object sender, RoutedEventArgs e) => _host.Act(en => en.AddTime(Id(sender), TimeSpan.FromMinutes(5)));
     private void OnSkip(object sender, RoutedEventArgs e) => _host.Act(en => en.SkipPhase(Id(sender)));

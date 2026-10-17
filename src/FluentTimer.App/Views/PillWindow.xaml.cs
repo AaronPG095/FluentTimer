@@ -295,6 +295,11 @@ public partial class PillWindow : Window
         if (((FrameworkElement)sender).Tag is Guid id) _host.Act(en => en.TogglePause(id));
     }
 
+    private void OnResetItem(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is Guid id) _host.Act(en => en.Reset(id));
+    }
+
     private void OnCancelItem(object sender, RoutedEventArgs e)
     {
         if (((FrameworkElement)sender).Tag is Guid id) _host.Act(en => en.Cancel(id));

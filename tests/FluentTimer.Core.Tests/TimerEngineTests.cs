@@ -115,6 +115,55 @@ public class TimerEngineTests
     }
 
     [Fact]
+    public void Reset_restarts_from_original_length_and_keeps_running()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartCountdown(60 * Min, "Deep work");
+        f.Engine.AddTime(t.Id, 5 * Min);
+        f.Advance(20 * Min);
+        f.Engine.Pause(t.Id);
+
+        f.Engine.Reset(t.Id);
+
+        Assert.Equal(TimerState.Running, t.State);
+        Assert.Equal(60 * Min, t.Duration);
+        Assert.Equal(60 * Min, t.Remaining(f.Clock.UtcNow));
+        var s = Assert.Single(f.Sessions); // the 20 minutes already spent still count
+        Assert.Equal(20 * Min, s.Duration);
+        Assert.False(s.Completed);
+    }
+
+    [Fact]
+    public void Reset_of_ringing_timer_clears_alert_and_runs_again()
+    {
+        var f = new EngineFixture();
+        var cleared = new List<Guid>();
+        f.Engine.TimerAlertsCleared += cleared.Add;
+        var t = f.Engine.StartCountdown(10 * Min);
+        f.Advance(10 * Min);
+        Assert.Equal(TimerState.Ringing, t.State);
+
+        f.Engine.Reset(t.Id);
+
+        Assert.Equal(TimerState.Running, t.State);
+        Assert.Contains(t.Id, cleared);
+        f.Advance(10 * Min);
+        Assert.Equal(2, f.Alerts.Count);
+    }
+
+    [Fact]
+    public void Reset_of_pomodoro_restarts_current_phase()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartPomodoro();
+        f.Advance(25 * Min); // now in a short break
+        f.Advance(2 * Min);
+        f.Engine.Reset(t.Id);
+        Assert.Equal(PomodoroPhase.ShortBreak, t.Phase);
+        Assert.Equal(5 * Min, t.Remaining(f.Clock.UtcNow));
+    }
+
+    [Fact]
     public void Pomodoro_cycles_work_and_breaks_with_long_break_every_fourth()
     {
         var f = new EngineFixture();

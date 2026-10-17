@@ -16,6 +16,9 @@ public sealed class TimerItem
     /// <summary>Length of the current run (or Pomodoro phase), including any snoozes.</summary>
     public TimeSpan Duration { get; set; }
 
+    /// <summary>Length the timer (or phase) started with, before +1/+5 or snoozes. Used by Reset.</summary>
+    public TimeSpan InitialDuration { get; set; }
+
     /// <summary>Wall-clock end time while running. Survives restarts because it is absolute.</summary>
     public DateTime? EndsAtUtc { get; set; }
 

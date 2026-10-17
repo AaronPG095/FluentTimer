@@ -37,6 +37,7 @@ internal static class ThemeService
     };
 
     public static bool IsDark { get; private set; } = true;
+    private static ApplicationTheme? _appliedTheme;
 
     public static void Apply(AppSettings settings)
     {
@@ -47,7 +48,12 @@ internal static class ThemeService
             _ => SystemPrefersDark(),
         };
         var theme = IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light;
-        ApplicationThemeManager.Apply(theme, WindowBackdropType.None, updateAccent: false);
+        // Only re-theme when it actually changes: WPF-UI also touches window backdrops when applying.
+        if (_appliedTheme != theme)
+        {
+            ApplicationThemeManager.Apply(theme, WindowBackdropType.None, updateAccent: false);
+            _appliedTheme = theme;
+        }
 
         var res = Application.Current.Resources;
         foreach (var (key, (dark, light)) in Palette)
