@@ -68,6 +68,12 @@ internal sealed class TrayService : IDisposable
         if (host.Alerts.Current is not null)
             menu.Items.Add(Item("Dismiss alerts", host.Alerts.DismissAll));
 
+        if (host.Updates.Available is { } update && UpdateService.CanSelfUpdate)
+        {
+            menu.Items.Add(new Separator());
+            menu.Items.Add(Item($"Update to {update.Version}", () => App.Current.InstallUpdate()));
+        }
+
         menu.Items.Add(new Separator());
         var hidden = host.Settings.Pill.Hidden;
         menu.Items.Add(Item(hidden ? "Show widget" : "Hide widget", () => App.Current.SetPillHidden(!hidden)));

@@ -61,6 +61,9 @@ public static class AppPaths
     /// <summary>Set FLUENTTIMER_DEV=1 to leave the Windows startup (Run key) untouched.</summary>
     public static bool IsDev => Environment.GetEnvironmentVariable("FLUENTTIMER_DEV") == "1";
 
+    /// <summary>Dev mode or a custom data folder (tests, CI): never touch the real Windows startup entry.</summary>
+    public static bool IsIsolated => IsDev || Environment.GetEnvironmentVariable("FLUENTTIMER_DATA") is { Length: > 0 };
+
     public static string Settings => System.IO.Path.Combine(DataDir, "settings.json");
     public static string State => System.IO.Path.Combine(DataDir, "state.json");
     public static string History => System.IO.Path.Combine(DataDir, "history.json");

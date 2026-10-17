@@ -12,7 +12,7 @@
     WindowStartupLocation="Manual"
     FontFamily="{StaticResource UiFont}"
     Opacity="0">
-    <!-- Positioned in code at the centre of the primary monitor (the window spans every monitor). -->
+    <!-- Positioned in code at the centre of the widget's monitor (the window spans every monitor). -->
     <Border x:Name="Card" HorizontalAlignment="Left" VerticalAlignment="Top" Width="440" Padding="32,28"
             Background="{DynamicResource ColumnCardBrush}" BorderBrush="{DynamicResource OverlayAccentBrush}"
             BorderThickness="1" CornerRadius="8">

@@ -32,8 +32,8 @@ public partial class DimOverlayWindow : Window
         KeyDown += (_, e) => { if (e.Key == Key.Escape) OnDismiss(this, e); };
         Loaded += (_, _) =>
         {
-            // Centre the card on the primary monitor rather than across monitor bezels.
-            var work = SystemParameters.WorkArea;
+            // Centre the card on the monitor the widget is on (never across monitor bezels).
+            var work = App.Current.WidgetWorkArea();
             Card.Margin = new Thickness(
                 work.Left - Left + (work.Width - Card.ActualWidth) / 2,
                 work.Top - Top + (work.Height - Card.ActualHeight) / 2.4, 0, 0);

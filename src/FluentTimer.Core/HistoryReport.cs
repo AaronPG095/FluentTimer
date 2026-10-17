@@ -5,6 +5,12 @@ namespace FluentTimer.Core;
 
 public sealed record LabelTotal(string Label, TimeSpan Total, int Sessions);
 
+/// <summary>One chart column: totals per series slot; the last slot is "Other".</summary>
+public sealed record DayTotals(DateOnly Day, TimeSpan[] BySeries)
+{
+    public TimeSpan Total => new(BySeries.Sum(t => t.Ticks));
+}
+
 public static class HistoryReport
 {
     public const string NoLabel = "(no label)";
@@ -30,6 +36,43 @@ public static class HistoryReport
                 new TimeSpan(g.Sum(r => r.Duration.Ticks)), g.Count()))
             .OrderByDescending(t => t.Total)
             .ToList();
+
+    /// <summary>
+    /// Per-day totals per series for a chart. <paramref name="series"/> are the labels that get their own colour
+    /// (in fixed order); everything else is summed into <see cref="Other"/>.
+    /// </summary>
+    public static IReadOnlyList<DayTotals> Daily(IEnumerable<SessionRecord> records, IClock clock, DateOnly firstDay, int days,
+        IReadOnlyList<string> series)
+    {
+        var result = Enumerable.Range(0, days).Select(i => new DayTotals(firstDay.AddDays(i), new TimeSpan[series.Count + 1])).ToList();
+        foreach (var r in records)
+        {
+            var day = DateOnly.FromDateTime(clock.ToLocal(r.EndedUtc));
+            var index = day.DayNumber - firstDay.DayNumber;
+            if (index < 0 || index >= days) continue;
+            var slot = IndexOf(series, Normalize(r.Label));
+            result[index].BySeries[slot < 0 ? series.Count : slot] += r.Duration;
+        }
+        return result;
+    }
+
+    public const string Other = "Other";
+
+    /// <summary>
+    /// Labels ranked by all-time total, so a label keeps its colour whichever period is shown
+    /// (colour follows the entity, not its rank in the current view).
+    /// </summary>
+    public static IReadOnlyList<string> SeriesLabels(IEnumerable<SessionRecord> allRecords, int max) =>
+        Totals(allRecords).Take(max).Select(t => t.Label).ToList();
+
+    private static string Normalize(string label) => string.IsNullOrWhiteSpace(label) ? NoLabel : label.Trim();
+
+    private static int IndexOf(IReadOnlyList<string> series, string label)
+    {
+        for (var i = 0; i < series.Count; i++)
+            if (string.Equals(series[i], label, StringComparison.OrdinalIgnoreCase)) return i;
+        return -1;
+    }
 
     public static string ToCsv(IEnumerable<SessionRecord> records, IClock clock)
     {

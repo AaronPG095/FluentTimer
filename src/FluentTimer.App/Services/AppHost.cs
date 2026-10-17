@@ -47,7 +47,7 @@ internal sealed class AppHost : IDisposable
     /// <summary>Dev-only event trace (FLUENTTIMER_DEV=1) written to trace.log in the data folder.</summary>
     public static void Trace(string message)
     {
-        if (!AppPaths.IsDev) return;
+        if (!AppPaths.IsIsolated) return;
         try { System.IO.File.AppendAllText(System.IO.Path.Combine(AppPaths.DataDir, "trace.log"), $"{DateTime.Now:HH:mm:ss.fff} {message}\n"); }
         catch (System.IO.IOException) { }
     }
@@ -59,7 +59,28 @@ internal sealed class AppHost : IDisposable
     public TimerEngine Engine { get; }
     public AlertManager Alerts { get; }
     public HotkeyService Hotkey { get; }
-    public string HotkeyError { get; private set; } = "";
+    public UpdateService Updates { get; } = new();
+    public IReadOnlyDictionary<HotkeyAction, string> HotkeyErrors { get; private set; } = new Dictionary<HotkeyAction, string>();
+
+    public string GetHotkey(HotkeyAction action) => action switch
+    {
+        HotkeyAction.QuickAdd => Settings.Hotkey,
+        HotkeyAction.PauseResume => Settings.HotkeyPauseResume,
+        HotkeyAction.Dismiss => Settings.HotkeyDismiss,
+        _ => Settings.HotkeyToggleWidget,
+    };
+
+    public void SetHotkey(HotkeyAction action, string gesture)
+    {
+        switch (action)
+        {
+            case HotkeyAction.QuickAdd: Settings.Hotkey = gesture; break;
+            case HotkeyAction.PauseResume: Settings.HotkeyPauseResume = gesture; break;
+            case HotkeyAction.Dismiss: Settings.HotkeyDismiss = gesture; break;
+            default: Settings.HotkeyToggleWidget = gesture; break;
+        }
+        SettingsChanged();
+    }
 
     /// <summary>All timers, soonest first. Shared by the pill, tray and main window.</summary>
     public ObservableCollection<TimerVm> Timers { get; } = [];
@@ -75,6 +96,23 @@ internal sealed class AppHost : IDisposable
         Engine.RaisePendingAlerts();
         _tick.Start();
         OnTick();
+        ScheduleUpdateCheck();
+    }
+
+    /// <summary>At most once a day, a minute after startup (so sign-in isn't slowed down).</summary>
+    private void ScheduleUpdateCheck()
+    {
+        if (!Settings.AutoCheckUpdates || AppPaths.IsDev) return;
+        if (Settings.LastUpdateCheckUtc is { } last && DateTime.UtcNow - last < TimeSpan.FromDays(1)) return;
+        var t = new DispatcherTimer { Interval = TimeSpan.FromMinutes(1) };
+        t.Tick += async (_, _) =>
+        {
+            t.Stop();
+            await Updates.CheckAsync();
+            Settings.LastUpdateCheckUtc = DateTime.UtcNow;
+            Restart(_saveSettings);
+        };
+        t.Start();
     }
 
     // ---- Commands used by the UI ------------------------------------------------------------
@@ -139,6 +177,35 @@ internal sealed class AppHost : IDisposable
         ApplySettings();
     }
 
+    /// <summary>Persist after a session was edited in place (e.g. relabelled).</summary>
+    public void HistoryEdited()
+    {
+        _historyStore.Save(History);
+        HistoryChanged?.Invoke();
+    }
+
+    public void DeleteSession(SessionRecord record)
+    {
+        History.Remove(record);
+        HistoryEdited();
+    }
+
+    /// <summary>Log a session you forgot to time.</summary>
+    public void AddSession(string label, DateTime startLocal, TimeSpan duration)
+    {
+        var start = TimeZoneInfo.ConvertTimeToUtc(DateTime.SpecifyKind(startLocal, DateTimeKind.Unspecified), Clock.Zone);
+        History.Add(new SessionRecord
+        {
+            Label = label.Trim(),
+            Kind = TimerKind.Countdown,
+            StartedUtc = start,
+            EndedUtc = start + duration,
+            Duration = duration,
+            Completed = true,
+        });
+        HistoryEdited();
+    }
+
     public void ClearHistory()
     {
         History.Clear();
@@ -157,10 +224,9 @@ internal sealed class AppHost : IDisposable
     private void ApplySettings()
     {
         ThemeService.Apply(Settings);
-        try { if (!AppPaths.IsDev) StartupRegistration.Apply(Settings.LaunchAtStartup); }
+        try { if (!AppPaths.IsIsolated) StartupRegistration.Apply(Settings.LaunchAtStartup); }
         catch (UnauthorizedAccessException) { /* locked-down registry: leave setting as-is */ }
-        Hotkey.Register(Settings.Hotkey, out var error);
-        HotkeyError = error;
+        HotkeyErrors = Hotkey.RegisterAll(Enum.GetValues<HotkeyAction>().ToDictionary(a => a, GetHotkey));
         SettingsApplied?.Invoke();
     }
 

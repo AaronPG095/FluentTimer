@@ -1,0 +1,51 @@
+name: release
+
+# Push a tag like v0.2.0 to publish a GitHub Release with the exe and its SHA-256.
+# The in-app updater reads releases/latest and verifies the checksum before installing.
+on:
+  push:
+    tags: ['v*']
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          global-json-file: global.json
+
+      - name: Version from tag
+        id: ver
+        shell: pwsh
+        run: |
+          $v = "${{ github.ref_name }}".TrimStart('v')
+          "version=$v" >> $env:GITHUB_OUTPUT
+
+      - name: Test
+        run: dotnet test tests/FluentTimer.Core.Tests -c Release
+
+      - name: Publish
+        run: dotnet publish src/FluentTimer.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -p:Version=${{ steps.ver.outputs.version }} -o publish
+
+      - name: UI smoke test (widget transparency)
+        run: ./tests/ui-smoke.ps1 -Exe publish/FluentTimer.exe
+        shell: pwsh
+
+      - name: Checksum
+        shell: pwsh
+        run: |
+          $hash = (Get-FileHash publish/FluentTimer.exe -Algorithm SHA256).Hash.ToLower()
+          "$hash  FluentTimer.exe" | Set-Content publish/FluentTimer.exe.sha256 -NoNewline -Encoding ascii
+
+      - name: Create release
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "${{ github.ref_name }}" publish/FluentTimer.exe publish/FluentTimer.exe.sha256 `
+            --title "Fluent Timer ${{ steps.ver.outputs.version }}" --generate-notes

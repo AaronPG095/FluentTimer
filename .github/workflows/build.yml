@@ -21,6 +21,10 @@ jobs:
       - name: Publish
         run: dotnet publish src/FluentTimer.App -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true -o publish
 
+      - name: UI smoke test (widget transparency)
+        shell: pwsh
+        run: ./tests/ui-smoke.ps1 -Exe publish/FluentTimer.exe
+
       - uses: actions/upload-artifact@v4
         with:
           name: FluentTimer-win-x64

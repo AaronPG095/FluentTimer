@@ -6,9 +6,9 @@
     ShutdownMode="OnExplicitShutdown">
     <Application.Resources>
         <ResourceDictionary>
+            <!-- WPF-UI's theme + control dictionaries are merged on demand (App.EnsureFluentUi) when a window
+                 that uses them first opens, so the tray-only app stays light. -->
             <ResourceDictionary.MergedDictionaries>
-                <ui:ThemesDictionary Theme="Dark" />
-                <ui:ControlsDictionary />
                 <ResourceDictionary Source="Themes/Styles.xaml" />
             </ResourceDictionary.MergedDictionaries>
         </ResourceDictionary>

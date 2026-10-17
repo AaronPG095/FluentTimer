@@ -27,12 +27,21 @@ public sealed class PillSettings
     public double? Top { get; set; }
     public bool ShowWhenIdle { get; set; } = true;
     public bool Hidden { get; set; }
+
+    /// <summary>Dim the widget and let clicks pass through it while the cursor is away.</summary>
+    public bool FadeWhenAway { get; set; } = true;
+
+    /// <summary>Stand the widget upright when it is snapped to the left or right screen edge.</summary>
+    public bool VerticalOnSides { get; set; } = true;
 }
 
 public sealed class AppSettings
 {
     public bool LaunchAtStartup { get; set; } = true;
     public string Hotkey { get; set; } = "Ctrl+Alt+T";
+    public string HotkeyPauseResume { get; set; } = "Ctrl+Alt+P";
+    public string HotkeyDismiss { get; set; } = "Ctrl+Alt+D";
+    public string HotkeyToggleWidget { get; set; } = "Ctrl+Alt+H";
     public AppTheme Theme { get; set; } = AppTheme.System;
     public AccentMode Accent { get; set; } = AccentMode.Brand;
     public string CustomAccent { get; set; } = "#0078D4";
@@ -45,6 +54,8 @@ public sealed class AppSettings
     public bool QuietWhenFullscreen { get; set; } = true;
     public int IdleMinutes { get; set; } = 5;
     public bool FirstRunDone { get; set; }
+    public bool AutoCheckUpdates { get; set; } = true;
+    public DateTime? LastUpdateCheckUtc { get; set; }
 }
 
 /// <summary>Everything that changes while the app runs and must survive a restart.</summary>

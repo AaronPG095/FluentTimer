@@ -80,6 +80,28 @@ public class StorageAndReportTests
     }
 
     [Fact]
+    public void Daily_splits_by_series_and_folds_the_rest_into_other()
+    {
+        var clock = new FakeClock(new DateTime(2026, 10, 14));
+        SessionRecord S(string label, int day, int minutes) => new()
+        {
+            Label = label,
+            EndedUtc = new DateTime(2026, 10, day, 12, 0, 0, DateTimeKind.Utc),
+            Duration = TimeSpan.FromMinutes(minutes),
+        };
+        var records = new[] { S("Client X", 12, 50), S("client x", 12, 10), S("Thesis", 13, 25), S("Email", 13, 5), S("Old", 1, 99) };
+
+        var series = HistoryReport.SeriesLabels(records, max: 2);
+        var days = HistoryReport.Daily(records, clock, new DateOnly(2026, 10, 12), 3, series);
+
+        Assert.Equal(["Old", "Client X"], series); // all-time ranking keeps colours stable
+        Assert.Equal(3, days.Count);
+        Assert.Equal(TimeSpan.FromMinutes(60), days[0].BySeries[1]);
+        Assert.Equal(TimeSpan.FromMinutes(30), days[1].BySeries[2]); // Thesis + Email -> Other
+        Assert.Equal(TimeSpan.Zero, days[2].Total);
+    }
+
+    [Fact]
     public void StartOfWeek_is_monday()
     {
         Assert.Equal(new DateTime(2026, 10, 12), HistoryReport.StartOfWeek(new DateTime(2026, 10, 18, 23, 0, 0)));

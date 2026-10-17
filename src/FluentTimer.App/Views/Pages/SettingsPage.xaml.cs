@@ -44,17 +44,33 @@ public partial class SettingsPage : UserControl
     private void OnHotkeyKeyDown(object sender, KeyEventArgs e)
     {
         e.Handled = true;
+        if (sender is not FrameworkElement { Tag: HotkeyRowVm row }) return;
         var key = e.Key == Key.System ? e.SystemKey : e.Key;
         if (key is Key.Escape or Key.Tab)
         {
             Keyboard.ClearFocus();
             return;
         }
+        if (key is Key.Back or Key.Delete && Keyboard.Modifiers == ModifierKeys.None)
+        {
+            _vm.SetHotkey(row, ""); // turn this shortcut off
+            Keyboard.ClearFocus();
+            return;
+        }
         var gesture = HotkeyService.Format(Keyboard.Modifiers, key);
         if (gesture.Length == 0 || Keyboard.Modifiers == ModifierKeys.None) return;
-        _vm.SetHotkey(gesture);
+        _vm.SetHotkey(row, gesture);
         Keyboard.ClearFocus();
     }
+
+    private async void OnCheckUpdates(object sender, RoutedEventArgs e)
+    {
+        await _host.Updates.CheckAsync();
+        _host.Settings.LastUpdateCheckUtc = DateTime.UtcNow;
+        _host.SettingsChanged();
+    }
+
+    private void OnInstallUpdate(object sender, RoutedEventArgs e) => App.Current.InstallUpdate();
 
     private void OnOpenData(object sender, RoutedEventArgs e)
     {

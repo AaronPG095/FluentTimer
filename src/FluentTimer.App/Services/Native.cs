@@ -67,10 +67,19 @@ internal static partial class Native
     [LibraryImport("user32.dll", EntryPoint = "SetWindowLongPtrW")]
     public static partial IntPtr SetWindowLongPtr(IntPtr hWnd, int index, IntPtr value);
 
+    public const int WS_EX_TRANSPARENT = 0x00000020;
+
     public static void AddExStyle(IntPtr hwnd, int flags)
     {
         var style = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
         SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(style | (long)flags));
+    }
+
+    public static void SetExStyle(IntPtr hwnd, int flag, bool on)
+    {
+        var style = GetWindowLongPtr(hwnd, GWL_EXSTYLE).ToInt64();
+        var next = on ? style | (long)flag : style & ~(long)flag;
+        if (next != style) SetWindowLongPtr(hwnd, GWL_EXSTYLE, new IntPtr(next));
     }
 
     [StructLayout(LayoutKind.Sequential)]

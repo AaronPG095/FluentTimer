@@ -65,14 +65,21 @@
                         </StackPanel>
                         <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding LaunchAtStartup, Mode=TwoWay}" />
                     </Grid>
-                    <Grid Style="{StaticResource Row}">
-                        <StackPanel>
-                            <TextBlock Text="Quick-add shortcut" Style="{StaticResource BodyText}" />
-                            <TextBlock Text="{Binding HotkeyStatus}" Style="{StaticResource MutedText}" />
-                        </StackPanel>
-                        <ui:TextBox x:Name="HotkeyBox" HorizontalAlignment="Right" Width="200" IsReadOnly="True" Text="{Binding Hotkey, Mode=OneWay}"
-                                    PlaceholderText="Press a shortcut…" PreviewKeyDown="OnHotkeyKeyDown" ToolTip="Click, then press the new shortcut" />
-                    </Grid>
+                    <ItemsControl ItemsSource="{Binding Hotkeys}">
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <Grid Style="{StaticResource Row}">
+                                    <StackPanel>
+                                        <TextBlock Style="{StaticResource BodyText}"><Run Text="{Binding Title, Mode=OneWay}" /><Run Text=" shortcut" /></TextBlock>
+                                        <TextBlock Text="{Binding Status}" Style="{StaticResource MutedText}" />
+                                    </StackPanel>
+                                    <ui:TextBox HorizontalAlignment="Right" Width="200" IsReadOnly="True" Text="{Binding Gesture, Mode=OneWay}"
+                                                PlaceholderText="Press a shortcut…" PreviewKeyDown="OnHotkeyKeyDown" Tag="{Binding}"
+                                                ToolTip="Click, then press the new shortcut. Backspace turns it off." />
+                                </Grid>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <Grid Style="{StaticResource Row}">
                         <TextBlock Text="Preset buttons (minutes)" Style="{StaticResource BodyText}" />
                         <ui:TextBox HorizontalAlignment="Right" Width="200" Text="{Binding Presets}" />
@@ -108,6 +115,20 @@
                             <TextBlock Text="A slim bar you can hover to start a timer" Style="{StaticResource MutedText}" />
                         </StackPanel>
                         <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding ShowWhenIdle, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
+                            <TextBlock Text="Fade when the cursor is away" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Dims the widget and lets clicks pass through it until you move the cursor close" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding FadeWhenAway, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
+                            <TextBlock Text="Stand upright on side edges" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Turns into a slim vertical bar when snapped to the left or right edge" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding VerticalOnSides, Mode=TwoWay}" />
                     </Grid>
                 </StackPanel>
             </Border>
@@ -168,6 +189,28 @@
                                         Visibility="{Binding IsCustomAccent, Converter={StaticResource BoolToVis}}" />
                             <ComboBox Width="200" ItemsSource="{x:Static vm:SettingsVm.AccentChoices}" SelectedItem="{Binding Accent, Mode=TwoWay}" />
                         </StackPanel>
+                    </Grid>
+                </StackPanel>
+            </Border>
+
+            <!-- Updates -->
+            <TextBlock Text="Updates" Style="{StaticResource SectionTitle}" Margin="0,16,0,8" />
+            <Border Style="{StaticResource Card}">
+                <StackPanel>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
+                            <TextBlock Text="{Binding UpdateStatus}" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Downloads from GitHub Releases, verifies the checksum, then restarts" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                            <Button Style="{StaticResource ChipButton}" Content="Check now" Margin="0,0,8,0" Click="OnCheckUpdates" />
+                            <Button Style="{StaticResource AccentButton}" Content="{Binding InstallLabel}" IsEnabled="{Binding CanInstallUpdate}"
+                                    Click="OnInstallUpdate" />
+                        </StackPanel>
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <TextBlock Text="Check for updates automatically (once a day)" Style="{StaticResource BodyText}" />
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding AutoCheckUpdates, Mode=TwoWay}" />
                     </Grid>
                 </StackPanel>
             </Border>

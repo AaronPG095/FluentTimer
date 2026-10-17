@@ -21,9 +21,15 @@
             <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+            <ColumnDefinition Width="Auto" />
+        </Grid.ColumnDefinitions>
 
-        <!-- Expanded list (moved above or below the pill depending on screen position) -->
-        <Border x:Name="ListPanel" Grid.Row="2" Visibility="Collapsed" Margin="0,8" MinWidth="260"
+        <!-- Expanded list: above/below a horizontal pill, beside a vertical one (placed in code) -->
+        <Border x:Name="ListPanel" Grid.Row="2" Grid.Column="1" Visibility="Collapsed" Margin="0,8" MinWidth="290"
+                AutomationProperties.Name="Running timers"
                 Background="{DynamicResource PillBackgroundBrush}" BorderBrush="{DynamicResource PillBorderBrush}"
                 BorderThickness="1" CornerRadius="8" Padding="6">
             <Border.Effect>
@@ -45,11 +51,12 @@
                                 <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{DynamicResource OverlayForegroundBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
                                 <Button Grid.Column="2" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="12"
-                                        Content="{Binding PauseGlyph}" ToolTip="{Binding PauseText}" Tag="{Binding Id}" Click="OnPauseItem" />
+                                        Content="{Binding PauseGlyph}" ToolTip="{Binding PauseText}" AutomationProperties.Name="{Binding PauseText}"
+                                        Tag="{Binding Id}" Click="OnPauseItem" />
                                 <Button Grid.Column="3" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="12"
-                                        Content="&#xE72C;" ToolTip="Reset" Tag="{Binding Id}" Click="OnResetItem" />
+                                        Content="&#xE72C;" ToolTip="Reset" AutomationProperties.Name="Reset" Tag="{Binding Id}" Click="OnResetItem" />
                                 <Button Grid.Column="4" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="11"
-                                        Content="&#xE711;" ToolTip="Cancel" Tag="{Binding Id}" Click="OnCancelItem" />
+                                        Content="&#xE711;" ToolTip="Cancel" AutomationProperties.Name="Cancel" Tag="{Binding Id}" Click="OnCancelItem" />
                             </Grid>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -69,7 +76,9 @@
         </Border>
 
         <!-- The pill -->
-        <Border x:Name="Pill" Grid.Row="1" HorizontalAlignment="Left" CornerRadius="15" MinHeight="10"
+        <Border x:Name="Pill" Grid.Row="1" Grid.Column="1" HorizontalAlignment="Left" VerticalAlignment="Top" CornerRadius="15" MinHeight="8"
+                AutomationProperties.Name="Fluent Timer widget"
+                AutomationProperties.HelpText="Click to pause or resume, double-click to open, right-click for options"
                 Background="{DynamicResource PillBackgroundBrush}" BorderBrush="{DynamicResource PillBorderBrush}"
                 BorderThickness="1" RenderTransformOrigin="0.5,0.5" Cursor="Hand"
                 MouseLeftButtonDown="OnPillMouseDown" MouseRightButtonUp="OnPillRightClick">
@@ -93,18 +102,19 @@
                 </StackPanel>
 
                 <!-- Running -->
-                <StackPanel x:Name="TimerContent" Orientation="Horizontal" Margin="11,0,12,0" Height="30" Visibility="Collapsed">
-                    <Grid Width="12" Margin="0,0,8,0">
+                <StackPanel x:Name="TimerContent" Orientation="Horizontal" Margin="11,0,12,0" MinHeight="30" Visibility="Collapsed">
+                    <Grid x:Name="DotHost" Width="12" Height="12" Margin="0,0,8,0">
                         <Ellipse x:Name="Dot" Width="8" Height="8" Fill="{DynamicResource OverlayAccentBrush}" />
                         <TextBlock x:Name="PausedGlyph" Style="{StaticResource Glyph}" Text="&#xE769;" FontSize="10"
                                    Foreground="{DynamicResource NoResultsForeground}" Visibility="Collapsed" />
                     </Grid>
                     <TextBlock x:Name="PillTime" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
-                               Foreground="{DynamicResource OverlayForegroundBrush}" VerticalAlignment="Center" />
+                               Foreground="{DynamicResource OverlayForegroundBrush}" VerticalAlignment="Center" TextAlignment="Center"
+                               HorizontalAlignment="Center" AutomationProperties.LiveSetting="Off" />
                     <TextBlock x:Name="PillLabel" Style="{StaticResource MutedText}" MaxWidth="170" TextTrimming="CharacterEllipsis"
                                TextWrapping="NoWrap" Margin="8,0,0,0" Visibility="Collapsed" />
                     <Border x:Name="Badge" CornerRadius="4" Background="{DynamicResource TabActiveBackground}" Padding="5,1" Margin="8,0,0,0"
-                            VerticalAlignment="Center" Visibility="Collapsed">
+                            VerticalAlignment="Center" HorizontalAlignment="Center" Visibility="Collapsed">
                         <TextBlock x:Name="BadgeText" FontSize="11" Foreground="{DynamicResource OverlayForegroundBrush}" />
                     </Border>
                 </StackPanel>
@@ -117,7 +127,8 @@
                     <TextBlock x:Name="AlertMessage" FontSize="12" Foreground="#E6FFFFFF" VerticalAlignment="Center" Margin="8,0,10,0"
                                MaxWidth="180" TextTrimming="CharacterEllipsis" />
                     <Button x:Name="AlertAction" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnAlertAction" />
-                    <Button x:Name="SnoozeButton" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnSnooze" />
+                    <Button x:Name="SnoozeButton" Style="{StaticResource ChipButton}" Padding="8,2" Margin="0,0,4,0" FontSize="12" Click="OnSnooze"
+                            AutomationProperties.Name="Snooze" />
                     <Button Style="{StaticResource ChipButton}" Padding="8,2" FontSize="12" Content="Dismiss" Click="OnDismiss" />
                 </StackPanel>
             </Grid>

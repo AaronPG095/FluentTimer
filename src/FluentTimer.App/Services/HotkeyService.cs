@@ -3,12 +3,14 @@ using System.Windows.Interop;
 
 namespace FluentTimer.App.Services;
 
-/// <summary>System-wide hotkey registered on an invisible message-only window.</summary>
+public enum HotkeyAction { QuickAdd, PauseResume, Dismiss, ToggleWidget }
+
+/// <summary>System-wide hotkeys registered on an invisible message-only window.</summary>
 internal sealed class HotkeyService : IDisposable
 {
-    private const int HotkeyId = 0x4654; // "FT"
+    private const int BaseId = 0x4654; // "FT"
     private readonly HwndSource _source;
-    private bool _registered;
+    private readonly HashSet<HotkeyAction> _registered = [];
 
     public HotkeyService()
     {
@@ -22,29 +24,42 @@ internal sealed class HotkeyService : IDisposable
         _source.AddHook(WndProc);
     }
 
-    public event Action? Pressed;
+    public event Action<HotkeyAction>? Pressed;
 
-    /// <summary>Registers e.g. "Ctrl+Alt+T". Returns false if invalid or already taken by another app.</summary>
-    public bool Register(string gesture, out string error)
+    /// <summary>
+    /// Registers every action's gesture (e.g. "Ctrl+Alt+T"; empty = off).
+    /// Returns an error per action that could not be registered.
+    /// </summary>
+    public Dictionary<HotkeyAction, string> RegisterAll(IReadOnlyDictionary<HotkeyAction, string> gestures)
     {
-        Unregister();
-        if (!TryParse(gesture, out var mods, out var key))
+        foreach (var a in _registered) Native.UnregisterHotKey(_source.Handle, BaseId + (int)a);
+        _registered.Clear();
+
+        var errors = new Dictionary<HotkeyAction, string>();
+        var seen = new Dictionary<string, HotkeyAction>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (action, gesture) in gestures)
         {
-            error = "Not a valid shortcut";
-            return false;
+            if (string.IsNullOrWhiteSpace(gesture)) continue;
+            if (!TryParse(gesture, out var mods, out var key)) { errors[action] = "Not a valid shortcut"; continue; }
+            if (seen.TryGetValue(gesture.Trim(), out var other)) { errors[action] = $"Same as {Describe(other)}"; continue; }
+            seen[gesture.Trim()] = action;
+
+            var vk = (uint)KeyInterop.VirtualKeyFromKey(key);
+            if (Native.RegisterHotKey(_source.Handle, BaseId + (int)action, (uint)(mods | Native.Modifiers.NoRepeat), vk))
+                _registered.Add(action);
+            else
+                errors[action] = "Already used by another app";
         }
-        var vk = (uint)KeyInterop.VirtualKeyFromKey(key);
-        _registered = Native.RegisterHotKey(_source.Handle, HotkeyId, (uint)(mods | Native.Modifiers.NoRepeat), vk);
-        error = _registered ? "" : "Already used by another app";
-        return _registered;
+        return errors;
     }
 
-    public void Unregister()
+    public static string Describe(HotkeyAction action) => action switch
     {
-        if (!_registered) return;
-        Native.UnregisterHotKey(_source.Handle, HotkeyId);
-        _registered = false;
-    }
+        HotkeyAction.QuickAdd => "Quick add",
+        HotkeyAction.PauseResume => "Pause / resume",
+        HotkeyAction.Dismiss => "Dismiss alert",
+        _ => "Show / hide widget",
+    };
 
     public static bool TryParse(string gesture, out Native.Modifiers mods, out Key key)
     {
@@ -83,17 +98,18 @@ internal sealed class HotkeyService : IDisposable
 
     private IntPtr WndProc(IntPtr hwnd, int msg, IntPtr wParam, IntPtr lParam, ref bool handled)
     {
-        if (msg == Native.WM_HOTKEY && wParam.ToInt32() == HotkeyId)
+        var id = wParam.ToInt32() - BaseId;
+        if (msg == Native.WM_HOTKEY && Enum.IsDefined(typeof(HotkeyAction), id))
         {
             handled = true;
-            Pressed?.Invoke();
+            Pressed?.Invoke((HotkeyAction)id);
         }
         return IntPtr.Zero;
     }
 
     public void Dispose()
     {
-        Unregister();
+        RegisterAll(new Dictionary<HotkeyAction, string>());
         _source.Dispose();
     }
 }

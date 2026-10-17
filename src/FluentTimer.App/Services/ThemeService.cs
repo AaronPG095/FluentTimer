@@ -39,6 +39,9 @@ internal static class ThemeService
     public static bool IsDark { get; private set; } = true;
     private static ApplicationTheme? _appliedTheme;
 
+    /// <summary>Set once App.EnsureFluentUi has merged WPF-UI's dictionaries.</summary>
+    public static bool FluentUiLoaded { get; set; }
+
     public static void Apply(AppSettings settings)
     {
         IsDark = settings.Theme switch
@@ -49,7 +52,7 @@ internal static class ThemeService
         };
         var theme = IsDark ? ApplicationTheme.Dark : ApplicationTheme.Light;
         // Only re-theme when it actually changes: WPF-UI also touches window backdrops when applying.
-        if (_appliedTheme != theme)
+        if (FluentUiLoaded && _appliedTheme != theme)
         {
             ApplicationThemeManager.Apply(theme, WindowBackdropType.None, updateAccent: false);
             _appliedTheme = theme;
@@ -60,7 +63,7 @@ internal static class ThemeService
             res[key] = Freeze(new SolidColorBrush((Color)ColorConverter.ConvertFromString(IsDark ? dark : light)));
 
         var accent = ResolveAccent(settings);
-        ApplicationAccentColorManager.Apply(accent, theme, false, false);
+        if (FluentUiLoaded) ApplicationAccentColorManager.Apply(accent, theme, false, false);
         res["OverlayAccentBrush"] = Freeze(new SolidColorBrush(accent));
         res["OverlayAccentColor"] = accent;
         res["AlertBrush"] = Freeze(new SolidColorBrush(AlertRed));

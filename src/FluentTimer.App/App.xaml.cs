@@ -20,6 +20,7 @@ public partial class App : Application
 
     protected override void OnStartup(StartupEventArgs e)
     {
+        UpdateService.FinishPreviousUpdate(e.Args); // waits for the old process after a self-update
         _instance = SingleInstance.TryAcquire(() => Dispatcher.BeginInvoke(() => ShowMain()));
         if (_instance is null)
         {
@@ -31,13 +32,13 @@ public partial class App : Application
         DispatcherUnhandledException += OnUnhandledException;
 
         _host = new AppHost();
-        _host.Hotkey.Pressed += ShowQuickEntry;
+        _host.Hotkey.Pressed += OnHotkey;
         _host.Start();
 
-        // Create (not show) the real main window first: WPF makes the first window created Application.MainWindow,
-        // and WPF-UI's theme manager restyles MainWindow — which breaks the widget's transparency if it's the widget.
-        _main = new MainWindow(_host);
-        MainWindow = _main;
+        // WPF makes the first window created Application.MainWindow, and WPF-UI's theme manager restyles
+        // MainWindow, which breaks the widget's transparency if that's the widget. A never-shown placeholder
+        // takes the role until the real main window exists (and keeps startup light).
+        MainWindow = new Window { Width = 0, Height = 0, WindowStyle = WindowStyle.None, ShowInTaskbar = false, ShowActivated = false };
 
         _tray = new TrayService(_host);
         _pill = new PillWindow(_host);
@@ -50,11 +51,21 @@ public partial class App : Application
             return;
         }
 
-        // Dev aid: FLUENTTIMER_SELFTEST=reapply re-applies settings after 3 s, like dropping the widget does.
-        if (AppPaths.IsDev && Environment.GetEnvironmentVariable("FLUENTTIMER_SELFTEST") == "reapply")
+        // Test hooks (only with an isolated data folder, so they can never act on real data):
+        //   FLUENTTIMER_SELFTEST=reapply  re-applies settings after 3 s, like dropping the widget does
+        //   FLUENTTIMER_SELFTEST=update   checks GitHub Releases and installs a newer version
+        var selfTest = AppPaths.IsIsolated ? Environment.GetEnvironmentVariable("FLUENTTIMER_SELFTEST") : null;
+        if (selfTest is "reapply" or "update")
         {
             var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-            t.Tick += (_, _) => { t.Stop(); _host.SettingsChanged(); };
+            t.Tick += async (_, _) =>
+            {
+                t.Stop();
+                if (selfTest == "reapply") { _host.SettingsChanged(); return; }
+                await _host.Updates.CheckAsync();
+                AppHost.Trace($"selftest update: {_host.Updates.Status}");
+                InstallUpdate();
+            };
             t.Start();
         }
 
@@ -70,7 +81,12 @@ public partial class App : Application
     public void ShowMain(string? page = null)
     {
         if (_host is null) return;
-        _main ??= new MainWindow(_host);
+        EnsureFluentUi();
+        if (_main is null)
+        {
+            _main = new MainWindow(_host);
+            MainWindow = _main;
+        }
         if (page is not null) _main.Navigate(page);
         _main.Show();
         if (_main.WindowState == WindowState.Minimized) _main.WindowState = WindowState.Normal;
@@ -85,15 +101,62 @@ public partial class App : Application
             _quick.Activate();
             return;
         }
+        EnsureFluentUi();
         _quick = new QuickEntryWindow(_host);
         _quick.Show();
     }
+
+    private void OnHotkey(HotkeyAction action)
+    {
+        if (_host is null) return;
+        switch (action)
+        {
+            case HotkeyAction.QuickAdd:
+                ShowQuickEntry();
+                break;
+            case HotkeyAction.PauseResume when _host.Timers.FirstOrDefault() is { } first:
+                _host.Act(e => e.TogglePause(first.Id));
+                break;
+            case HotkeyAction.Dismiss when _host.Alerts.Current is { } alert:
+                _host.Alerts.Dismiss(alert);
+                break;
+            case HotkeyAction.ToggleWidget:
+                SetPillHidden(!_host.Settings.Pill.Hidden);
+                break;
+        }
+    }
+
+    /// <summary>Merge WPF-UI's theme and control styles the first time a window that uses them opens.</summary>
+    private void EnsureFluentUi()
+    {
+        if (ThemeService.FluentUiLoaded || _host is null) return;
+        Resources.MergedDictionaries.Insert(0, new Wpf.Ui.Markup.ThemesDictionary { Theme = Wpf.Ui.Appearance.ApplicationTheme.Dark });
+        Resources.MergedDictionaries.Insert(1, new Wpf.Ui.Markup.ControlsDictionary());
+        ThemeService.FluentUiLoaded = true;
+        ThemeService.Apply(_host.Settings);
+    }
+
+    /// <summary>Work area of the monitor the widget is on (primary if the widget isn't placed yet).</summary>
+    public Rect WidgetWorkArea() => _pill?.CurrentWorkArea() ?? SystemParameters.WorkArea;
 
     public void SetPillHidden(bool hidden)
     {
         if (_host is null) return;
         _host.Settings.Pill.Hidden = hidden;
         _host.SettingsChanged();
+    }
+
+    /// <summary>Download, verify and swap in the new version, then hand over to it.</summary>
+    public async void InstallUpdate()
+    {
+        if (_host is null) return;
+        _host.SaveAll();
+        var ok = await _host.Updates.InstallAsync(() =>
+        {
+            _instance?.Dispose(); // let the new process take the single-instance lock
+            _instance = null;
+        });
+        if (ok) Quit();
     }
 
     public void Quit()

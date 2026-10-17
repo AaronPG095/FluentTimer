@@ -1,5 +1,6 @@
 using System.ComponentModel;
 using System.Windows;
+using System.Windows.Automation;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Interop;
@@ -21,9 +22,18 @@ public partial class PillWindow : Window
     private const double EdgeGap = 4;
 
     private readonly AppHost _host;
+    private const double NearDistance = 36;   // DIPs around the pill where it wakes up
+    private const double AwayOpacity = 0.6;
+    private static readonly TimeSpan ExpandDwell = TimeSpan.FromMilliseconds(180);
+    private static readonly TimeSpan CollapseDwell = TimeSpan.FromMilliseconds(380);
+
     private readonly DispatcherTimer _clickDelay;
-    private readonly DispatcherTimer _hoverIn;
-    private readonly DispatcherTimer _hoverOut;
+    private readonly DispatcherTimer _presence;
+    private IntPtr _hwnd;
+    private DateTime _overSince = DateTime.MaxValue;
+    private DateTime _awaySince = DateTime.MaxValue;
+    private bool _clickThrough;
+    private bool _vertical;
     private bool _expanded;
     private bool _anchorRight;
     private bool _anchorBottom;
@@ -40,23 +50,26 @@ public partial class PillWindow : Window
 
         _clickDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Native.GetDoubleClickTime()) };
         _clickDelay.Tick += (_, _) => { _clickDelay.Stop(); OnSingleClick(); };
-        _hoverIn = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
-        _hoverIn.Tick += (_, _) => { _hoverIn.Stop(); if (CursorIsOver()) SetExpanded(true); };
-        _hoverOut = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
-        _hoverOut.Tick += (_, _) => { _hoverOut.Stop(); if (!CursorIsOver()) SetExpanded(false); };
+        // One loop reads the real cursor position and drives hover, fade and click-through.
+        // (Event-based hover is unreliable on layered windows and impossible while click-through.)
+        _presence = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(80) };
+        _presence.Tick += (_, _) => UpdatePresence();
 
-        MouseEnter += (_, _) => { _hoverOut.Stop(); if (!_expanded) _hoverIn.Start(); };
-        MouseLeave += (_, _) => { _hoverIn.Stop(); if (ContextMenu is not { IsOpen: true }) _hoverOut.Start(); };
         SizeChanged += (_, _) => Reposition();
         SourceInitialized += (_, _) =>
         {
-            var hwnd = new WindowInteropHelper(this).Handle;
-            Native.AddExStyle(hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
+            _hwnd = new WindowInteropHelper(this).Handle;
+            Native.AddExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
         };
+        IsVisibleChanged += (_, _) => { if (IsVisible) _presence.Start(); else _presence.Stop(); };
         Loaded += (_, _) => InitPosition();
 
         host.Ticked += Refresh;
-        host.SettingsApplied += UpdateVisibility;
+        host.SettingsApplied += () =>
+        {
+            UpdateVisibility();
+            if (_positioned) CaptureAnchor(save: false); // picks up "stand upright on side edges" changes
+        };
         host.Alerts.CurrentChanged += OnAlertChanged;
         Refresh();
     }
@@ -77,7 +90,6 @@ public partial class PillWindow : Window
     {
         UpdateVisibility();
         if (!IsVisible || _shownAlert is not null) return;
-        if (_expanded && !_hoverOut.IsEnabled && !CursorIsOver()) _hoverOut.Start();
 
         var first = _host.Timers.FirstOrDefault();
         var idle = first is null;
@@ -86,11 +98,15 @@ public partial class PillWindow : Window
         TimerContent.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
         ListPanel.Visibility = !idle && _expanded ? Visibility.Visible : Visibility.Collapsed;
         Pill.Opacity = idle && !_expanded ? 0.75 : 1;
+        ApplyOrientation(idle);
         if (idle) return;
 
-        PillTime.Text = first!.TimeText;
+        // Vertical: minutes stacked over seconds, like a narrow side bar.
+        PillTime.Text = _vertical ? first!.TimeText.Replace(":", "\n") : first!.TimeText;
+        AutomationProperties.SetName(Pill, $"{first.Label}, {first.TimeText} left");
         PillLabel.Text = first.Label;
-        PillLabel.Visibility = _expanded || _host.Timers.Count == 1 && first.Label.Length <= 14 ? Visibility.Visible : Visibility.Collapsed;
+        PillLabel.Visibility = !_vertical && (_expanded || _host.Timers.Count == 1 && first.Label.Length <= 14)
+            ? Visibility.Visible : Visibility.Collapsed;
         var extra = _host.Timers.Count - 1;
         Badge.Visibility = extra > 0 ? Visibility.Visible : Visibility.Collapsed;
         BadgeText.Text = $"+{extra}";
@@ -103,21 +119,73 @@ public partial class PillWindow : Window
         Dot.Opacity = running ? 0.55 + 0.45 * Math.Abs(Math.Cos(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI / 2)) : 1;
     }
 
-    /// <summary>
-    /// WPF can report a stale MouseEnter for layered windows, so confirm with the real cursor position.
-    /// Only the visible parts count, not the transparent headroom.
-    /// </summary>
-    private bool CursorIsOver()
+    private void ApplyOrientation(bool idle)
     {
-        if (!Native.GetCursorPos(out var pt) || PresentationSource.FromVisual(this) is not { } src) return false;
-        var p = src.CompositionTarget!.TransformFromDevice.Transform(new Point(pt.X, pt.Y));
-        bool Over(FrameworkElement e)
+        var v = _vertical;
+        TimerContent.Orientation = v ? Orientation.Vertical : Orientation.Horizontal;
+        TimerContent.Margin = v ? new Thickness(0, 10, 0, 10) : new Thickness(11, 0, 12, 0);
+        TimerContent.Width = v ? 40 : double.NaN;
+        DotHost.Margin = v ? new Thickness(0, 0, 0, 6) : new Thickness(0, 0, 8, 0);
+        Badge.Margin = v ? new Thickness(0, 6, 0, 0) : new Thickness(8, 0, 0, 0);
+        PillTime.LineHeight = v ? 15 : double.NaN;
+        IdleBar.Width = v ? 8 : 44;
+        IdleBar.Height = v ? 44 : 8;
+        // The hover list sits beside a vertical pill, above/below a horizontal one.
+        if (v)
         {
-            if (!e.IsVisible) return false;
-            var o = e.TranslatePoint(new Point(0, 0), this);
-            return new Rect(Left + o.X, Top + o.Y, e.ActualWidth, e.ActualHeight).Contains(p);
+            Grid.SetRow(ListPanel, 1);
+            Grid.SetColumn(ListPanel, _anchorRight ? 0 : 2);
+            ListPanel.Margin = new Thickness(8, 0, 8, 0);
+            ListPanel.VerticalAlignment = _anchorBottom ? VerticalAlignment.Bottom : VerticalAlignment.Top;
         }
-        return Over(Pill) || Over(ListPanel) || ContextMenu is { IsOpen: true };
+        else
+        {
+            Grid.SetRow(ListPanel, _anchorBottom ? 0 : 2);
+            Grid.SetColumn(ListPanel, 1);
+            ListPanel.Margin = new Thickness(0, 8, 0, 8);
+            ListPanel.VerticalAlignment = VerticalAlignment.Top;
+        }
+    }
+
+    /// <summary>Cursor position in DIPs, plus whether it is over the visible parts (or near the pill).</summary>
+    private (bool Over, bool Near) CursorState()
+    {
+        if (!Native.GetCursorPos(out var pt) || PresentationSource.FromVisual(this) is not { CompositionTarget: { } target })
+            return (false, false);
+        var p = target.TransformFromDevice.Transform(new Point(pt.X, pt.Y));
+        Rect RectOf(FrameworkElement e)
+        {
+            var o = e.TranslatePoint(new Point(0, 0), this);
+            return new Rect(Left + o.X, Top + o.Y, e.ActualWidth, e.ActualHeight);
+        }
+        var pill = RectOf(Pill);
+        var over = pill.Contains(p) || ListPanel.IsVisible && RectOf(ListPanel).Contains(p) || ContextMenu is { IsOpen: true };
+        pill.Inflate(NearDistance, NearDistance);
+        return (over, over || pill.Contains(p));
+    }
+
+    private bool CursorIsOver() => CursorState().Over;
+
+    /// <summary>Hover with dwell times, and fade + click-through while the cursor is away.</summary>
+    private void UpdatePresence()
+    {
+        var now = DateTime.UtcNow;
+        var (over, near) = CursorState();
+        var dragging = Mouse.LeftButton == MouseButtonState.Pressed && over;
+
+        if (over) { _awaySince = DateTime.MaxValue; if (_overSince == DateTime.MaxValue) _overSince = now; }
+        else { _overSince = DateTime.MaxValue; if (_awaySince == DateTime.MaxValue) _awaySince = now; }
+
+        if (!_expanded && over && !dragging && now - _overSince >= ExpandDwell) SetExpanded(true);
+        else if (_expanded && !over && now - _awaySince >= CollapseDwell) SetExpanded(false);
+
+        var fade = _host.Settings.Pill.FadeWhenAway && !near && !_expanded && _shownAlert is null;
+        if (fade != _clickThrough && _hwnd != IntPtr.Zero)
+        {
+            _clickThrough = fade;
+            Native.SetExStyle(_hwnd, Native.WS_EX_TRANSPARENT, fade);
+            Outer.BeginAnimation(OpacityProperty, new DoubleAnimation(fade ? AwayOpacity : 1, TimeSpan.FromMilliseconds(fade ? 400 : 120)));
+        }
     }
 
     private void SetExpanded(bool expanded)
@@ -284,7 +352,6 @@ public partial class PillWindow : Window
     {
         var menu = new ContextMenu();
         TrayService.BuildMenu(menu);
-        menu.Closed += (_, _) => { if (!IsMouseOver) _hoverOut.Start(); };
         ContextMenu = menu;
         menu.IsOpen = true;
         e.Handled = true;
@@ -358,8 +425,10 @@ public partial class PillWindow : Window
         _anchorBottom = y + h / 2 > work.Top + work.Height / 2;
         _anchor = new Point(_anchorRight ? x + w : x, _anchorBottom ? y + h : y);
 
-        // List grows away from the anchored edge too.
-        Grid.SetRow(ListPanel, _anchorBottom ? 0 : 2);
+        // Snapped flush to the left or right edge → stand upright (Wispr-style side bar).
+        var onSide = x <= work.Left + EdgeGap + 1 || x + w >= work.Right - EdgeGap - 1;
+        _vertical = _host.Settings.Pill.VerticalOnSides && onSide;
+        ApplyOrientation(_host.Timers.Count == 0); // also places the list away from the anchored edge
         var align = _anchorRight ? HorizontalAlignment.Right : HorizontalAlignment.Left;
         Pill.HorizontalAlignment = align;
         ListPanel.HorizontalAlignment = align;
@@ -394,7 +463,18 @@ public partial class PillWindow : Window
         Reposition();
     }
 
-    /// <summary>Work area (in DIPs) of the monitor under a DIP point.</summary>
+    /// <summary>Work area (DIPs) of the monitor the widget is on, used to place the break card.</summary>
+    public Rect CurrentWorkArea()
+    {
+        if (!_positioned) return SystemParameters.WorkArea;
+        var o = PillOffset();
+        return WorkAreaDip(Left + o.X + Pill.ActualWidth / 2, Top + o.Y + Pill.ActualHeight / 2);
+    }
+
+    /// <summary>
+    /// Work area (in DIPs) of the monitor under a DIP point. The conversion uses this window's own DPI,
+    /// which under per-monitor-v2 awareness is the DPI of the monitor it currently sits on.
+    /// </summary>
     private Rect WorkAreaDip(double x, double y)
     {
         var source = PresentationSource.FromVisual(this);

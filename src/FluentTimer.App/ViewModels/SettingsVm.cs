@@ -63,10 +63,35 @@ public sealed class AlertEditorVm : ObservableObject
     }
 }
 
+/// <summary>One global shortcut row in Settings: name, current gesture, and whether it registered.</summary>
+public sealed class HotkeyRowVm : ObservableObject
+{
+    private readonly AppHost _host;
+
+    internal HotkeyRowVm(HotkeyAction action, AppHost host)
+    {
+        Action = action;
+        _host = host;
+    }
+
+    public HotkeyAction Action { get; }
+    public string Title => HotkeyService.Describe(Action);
+    public string Gesture => _host.GetHotkey(Action);
+
+    public string Status => string.IsNullOrWhiteSpace(Gesture)
+        ? "Off"
+        : _host.HotkeyErrors.TryGetValue(Action, out var e) ? $"⚠ {e}. Pick another." : "Active everywhere";
+
+    public void Refresh()
+    {
+        OnPropertyChanged(nameof(Gesture));
+        OnPropertyChanged(nameof(Status));
+    }
+}
+
 public sealed class SettingsVm : ObservableObject
 {
     private readonly AppHost _host;
-    private string _hotkeyStatus = "";
 
     internal SettingsVm(AppHost host)
     {
@@ -74,7 +99,8 @@ public sealed class SettingsVm : ObservableObject
         TimerAlert = new AlertEditorVm("Timers, alarms & reminders", "Used when a countdown finishes, an alarm goes off or a reminder fires.",
             S.DefaultAlert, Save);
         BreakAlert = new AlertEditorVm("Breaks", "Used by reminders that include a break countdown.", S.BreakAlert, Save);
-        UpdateHotkeyStatus();
+        Hotkeys = Enum.GetValues<HotkeyAction>().Select(a => new HotkeyRowVm(a, host)).ToList();
+        host.Updates.Changed += OnUpdatesChanged;
     }
 
     private AppSettings S => _host.Settings;
@@ -86,6 +112,8 @@ public sealed class SettingsVm : ObservableObject
     public bool LaunchAtStartup { get => S.LaunchAtStartup; set { S.LaunchAtStartup = value; Save(); } }
     public bool ShowWidget { get => !S.Pill.Hidden; set { S.Pill.Hidden = !value; Save(); } }
     public bool ShowWhenIdle { get => S.Pill.ShowWhenIdle; set { S.Pill.ShowWhenIdle = value; Save(); } }
+    public bool FadeWhenAway { get => S.Pill.FadeWhenAway; set { S.Pill.FadeWhenAway = value; Save(); } }
+    public bool VerticalOnSides { get => S.Pill.VerticalOnSides; set { S.Pill.VerticalOnSides = value; Save(); } }
     public bool QuietWhenFullscreen { get => S.QuietWhenFullscreen; set { S.QuietWhenFullscreen = value; Save(); } }
     public double? SnoozeMinutes { get => S.SnoozeMinutes; set { if (value is >= 1) { S.SnoozeMinutes = (int)value; Save(); } } }
     public double? IdleMinutes { get => S.IdleMinutes; set { if (value is >= 1) { S.IdleMinutes = (int)value; Save(); } } }
@@ -102,20 +130,14 @@ public sealed class SettingsVm : ObservableObject
         }
     }
 
-    // Hotkey
-    public string Hotkey => S.Hotkey;
-    public string HotkeyStatus { get => _hotkeyStatus; private set => SetProperty(ref _hotkeyStatus, value); }
+    // Hotkeys
+    public IReadOnlyList<HotkeyRowVm> Hotkeys { get; }
 
-    public void SetHotkey(string gesture)
+    public void SetHotkey(HotkeyRowVm row, string gesture)
     {
-        S.Hotkey = gesture;
-        Save();
-        OnPropertyChanged(nameof(Hotkey));
-        UpdateHotkeyStatus();
+        _host.SetHotkey(row.Action, gesture);
+        foreach (var r in Hotkeys) r.Refresh();
     }
-
-    private void UpdateHotkeyStatus() =>
-        HotkeyStatus = _host.HotkeyError.Length == 0 ? "Active everywhere" : $"⚠ {_host.HotkeyError}. Pick another.";
 
     // Pomodoro
     public double? WorkMinutes { get => S.Pomodoro.WorkMinutes; set { if (value is >= 1) { S.Pomodoro.WorkMinutes = (int)value; Save(); } } }
@@ -152,6 +174,19 @@ public sealed class SettingsVm : ObservableObject
             if (ThemeService.TryParseColor(value, out _)) { S.CustomAccent = value.Trim(); Save(); }
             OnPropertyChanged();
         }
+    }
+
+    // Updates
+    public bool AutoCheckUpdates { get => S.AutoCheckUpdates; set { S.AutoCheckUpdates = value; Save(); } }
+    public string UpdateStatus => _host.Updates.Status.Length > 0 ? _host.Updates.Status : $"Version {Version}";
+    public bool CanInstallUpdate => _host.Updates.Available is not null && !_host.Updates.Busy && UpdateService.CanSelfUpdate;
+    public string InstallLabel => _host.Updates.Available is { } r ? $"Update to {r.Version}" : "Update";
+
+    private void OnUpdatesChanged()
+    {
+        OnPropertyChanged(nameof(UpdateStatus));
+        OnPropertyChanged(nameof(CanInstallUpdate));
+        OnPropertyChanged(nameof(InstallLabel));
     }
 
     public string DataFolder => AppPaths.DataDir;
