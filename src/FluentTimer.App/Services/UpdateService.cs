@@ -12,9 +12,11 @@ namespace FluentTimer.App.Services;
 internal sealed class UpdateService
 {
     public const string AfterUpdateArg = "--after-update";
-    private static readonly HttpClient Http = CreateClient();
 
+    // Declared before Http: static initializers run in source order, and CreateClient reads Current.
     public static Version Current { get; } = typeof(UpdateService).Assembly.GetName().Version ?? new Version(0, 0, 0);
+
+    private static readonly HttpClient Http = CreateClient();
 
     public ReleaseInfo? Available { get; private set; }
     public string Status { get; private set; } = "";

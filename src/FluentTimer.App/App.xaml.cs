@@ -62,6 +62,7 @@ public partial class App : Application
             {
                 t.Stop();
                 if (selfTest == "reapply") { _host.SettingsChanged(); return; }
+                AppHost.Trace($"selftest update: running {UpdateService.Current}");
                 await _host.Updates.CheckAsync();
                 AppHost.Trace($"selftest update: {_host.Updates.Status}");
                 InstallUpdate();
@@ -156,6 +157,7 @@ public partial class App : Application
             _instance?.Dispose(); // let the new process take the single-instance lock
             _instance = null;
         });
+        AppHost.Trace($"install update: ok={ok} status={_host.Updates.Status}");
         if (ok) Quit();
     }
 
