@@ -1,4 +1,5 @@
 ﻿using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Media;
 using FluentTimer.Core;
 using Microsoft.Win32;
@@ -58,6 +59,21 @@ internal static class ThemeService
         res["OverlayAccentColor"] = accent;
         res["AlertBrush"] = Freeze(new SolidColorBrush(AlertRed));
         res["AlertColor"] = AlertRed;
+        RestoreWindowBackgrounds();
+    }
+
+    /// <summary>
+    /// WPF-UI's theme manager paints Application.MainWindow (the first window created, i.e. the pill) with a
+    /// solid theme background, which would fill the pill's transparent headroom. Put every window's own background back.
+    /// </summary>
+    private static void RestoreWindowBackgrounds()
+    {
+        foreach (Window w in Application.Current.Windows)
+        {
+            if (w is Views.DimOverlayWindow) w.SetResourceReference(Control.BackgroundProperty, "ScrimBrush");
+            else if (w.AllowsTransparency) w.Background = Brushes.Transparent;
+            else w.SetResourceReference(Control.BackgroundProperty, "ContentBackgroundBrush");
+        }
     }
 
     public static Color ResolveAccent(AppSettings settings) => settings.Accent switch

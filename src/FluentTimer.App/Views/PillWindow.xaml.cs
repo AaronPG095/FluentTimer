@@ -41,9 +41,9 @@ public partial class PillWindow : Window
         _clickDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Native.GetDoubleClickTime()) };
         _clickDelay.Tick += (_, _) => { _clickDelay.Stop(); OnSingleClick(); };
         _hoverIn = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(180) };
-        _hoverIn.Tick += (_, _) => { _hoverIn.Stop(); SetExpanded(true); };
+        _hoverIn.Tick += (_, _) => { _hoverIn.Stop(); if (CursorIsOver()) SetExpanded(true); };
         _hoverOut = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(380) };
-        _hoverOut.Tick += (_, _) => { _hoverOut.Stop(); SetExpanded(false); };
+        _hoverOut.Tick += (_, _) => { _hoverOut.Stop(); if (!CursorIsOver()) SetExpanded(false); };
 
         MouseEnter += (_, _) => { _hoverOut.Stop(); if (!_expanded) _hoverIn.Start(); };
         MouseLeave += (_, _) => { _hoverIn.Stop(); if (ContextMenu is not { IsOpen: true }) _hoverOut.Start(); };
@@ -77,6 +77,7 @@ public partial class PillWindow : Window
     {
         UpdateVisibility();
         if (!IsVisible || _shownAlert is not null) return;
+        if (_expanded && !_hoverOut.IsEnabled && !CursorIsOver()) _hoverOut.Start();
 
         var first = _host.Timers.FirstOrDefault();
         var idle = first is null;
@@ -100,6 +101,23 @@ public partial class PillWindow : Window
         PillTime.Opacity = running ? 1 : 0.6;
         // Gentle breathing dot while running.
         Dot.Opacity = running ? 0.55 + 0.45 * Math.Abs(Math.Cos(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI / 2)) : 1;
+    }
+
+    /// <summary>
+    /// WPF can report a stale MouseEnter for layered windows, so confirm with the real cursor position.
+    /// Only the visible parts count, not the transparent headroom.
+    /// </summary>
+    private bool CursorIsOver()
+    {
+        if (!Native.GetCursorPos(out var pt) || PresentationSource.FromVisual(this) is not { } src) return false;
+        var p = src.CompositionTarget!.TransformFromDevice.Transform(new Point(pt.X, pt.Y));
+        bool Over(FrameworkElement e)
+        {
+            if (!e.IsVisible) return false;
+            var o = e.TranslatePoint(new Point(0, 0), this);
+            return new Rect(Left + o.X, Top + o.Y, e.ActualWidth, e.ActualHeight).Contains(p);
+        }
+        return Over(Pill) || Over(ListPanel) || ContextMenu is { IsOpen: true };
     }
 
     private void SetExpanded(bool expanded)

@@ -57,7 +57,11 @@ public partial class App : Application
     public void ShowMain(string? page = null)
     {
         if (_host is null) return;
-        _main ??= new MainWindow(_host);
+        if (_main is null)
+        {
+            _main = new MainWindow(_host);
+            MainWindow = _main; // otherwise WPF treats the first window created (the pill) as the main window
+        }
         if (page is not null) _main.Navigate(page);
         _main.Show();
         if (_main.WindowState == WindowState.Minimized) _main.WindowState = WindowState.Normal;
