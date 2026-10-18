@@ -117,8 +117,39 @@ public partial class PillWindow : Window
         PausedGlyph.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
         Dot.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         PillTime.Opacity = running ? 1 : 0.6;
-        // Gentle breathing dot while running.
-        Dot.Opacity = running ? 0.55 + 0.45 * Math.Abs(Math.Cos(DateTime.UtcNow.TimeOfDay.TotalSeconds * Math.PI / 2)) : 1;
+        SetBreathing(running);
+    }
+
+    private bool _breathing;
+
+    /// <summary>
+    /// Gentle breathing dot while a timer runs. Driven by WPF's animation clock (display frame rate, render thread)
+    /// rather than the 4 Hz app tick, so it fades smoothly instead of stepping.
+    /// </summary>
+    private void SetBreathing(bool on)
+    {
+        on &= SystemParameters.ClientAreaAnimation; // honour "show animations in Windows" off
+        if (on == _breathing) return;
+        _breathing = on;
+        if (!on)
+        {
+            Dot.BeginAnimation(OpacityProperty, null);
+            DotScale.BeginAnimation(ScaleTransform.ScaleXProperty, null);
+            DotScale.BeginAnimation(ScaleTransform.ScaleYProperty, null);
+            Dot.Opacity = 1;
+            return;
+        }
+        var ease = new SineEase { EasingMode = EasingMode.EaseInOut };
+        var period = TimeSpan.FromSeconds(1.4); // one fade; a full breath (in + out) is 2.8 s
+        Timeline Breath(double from, double to) => new DoubleAnimation(from, to, period)
+        {
+            AutoReverse = true,
+            RepeatBehavior = RepeatBehavior.Forever,
+            EasingFunction = ease,
+        };
+        Dot.BeginAnimation(OpacityProperty, (DoubleAnimation)Breath(1.0, 0.35));
+        DotScale.BeginAnimation(ScaleTransform.ScaleXProperty, (DoubleAnimation)Breath(1.0, 0.82));
+        DotScale.BeginAnimation(ScaleTransform.ScaleYProperty, (DoubleAnimation)Breath(1.0, 0.82));
     }
 
     private void ApplyOrientation(bool idle)
