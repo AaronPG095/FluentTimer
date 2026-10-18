@@ -109,7 +109,25 @@ public sealed class SettingsVm : ObservableObject
     public AlertEditorVm BreakAlert { get; }
 
     // General
-    public bool LaunchAtStartup { get => S.LaunchAtStartup; set { S.LaunchAtStartup = value; Save(); } }
+    public bool LaunchAtStartup
+    {
+        get => S.LaunchAtStartup;
+        set
+        {
+            S.LaunchAtStartup = value;
+            // An explicit switch-on here also re-enables it in Windows' Startup apps list.
+            try { if (!AppPaths.IsIsolated) StartupRegistration.Apply(value, userChoice: true); }
+            catch (UnauthorizedAccessException) { }
+            Save();
+            OnPropertyChanged(nameof(StartupStatus));
+        }
+    }
+
+    public string StartupStatus =>
+        !S.LaunchAtStartup ? "Off. Start it from the Start menu search or the exe when you need it"
+        : !AppPaths.IsIsolated && StartupRegistration.IsDisabledInWindows()
+            ? "⚠ Switched off in Windows (Task Manager → Startup apps). Toggle off and on here to re-enable"
+            : "Starts quietly in the tray when you sign in to Windows";
     public bool ShowWidget { get => !S.Pill.Hidden; set { S.Pill.Hidden = !value; Save(); } }
     public bool ShowWhenIdle { get => S.Pill.ShowWhenIdle; set { S.Pill.ShowWhenIdle = value; Save(); } }
     public bool FadeWhenAway { get => S.Pill.FadeWhenAway; set { S.Pill.FadeWhenAway = value; Save(); } }

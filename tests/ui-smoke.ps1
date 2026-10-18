@@ -3,12 +3,12 @@ UI smoke test for the floating widget. Runs the app with an isolated data folder
 Windows startup), re-applies settings like dropping the widget does, then checks that:
   1. the app is still running and logged no error,
   2. the widget window exists and its pill is drawn (pixels differ from the desktop behind it),
-  3. its transparent headroom really is transparent (pixels match the screen captured before launch).
+  3. its transparent headroom really is transparent (it shows the test's own magenta backdrop behind it).
 Exit code 0 = pass, 1 = fail. If no desktop is available to capture, it reports SKIP and exits 0.
 
 Usage: pwsh tests/ui-smoke.ps1 -Exe publish/FluentTimer.exe
 #>
-param([Parameter(Mandatory)] [string]$Exe)
+param([Parameter(Mandatory)] [string]$Exe, [string]$Artifacts = (Join-Path ([IO.Path]::GetTempPath()) 'FluentTimerSmokeArtifacts'))
 
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing, System.Windows.Forms
@@ -32,7 +32,16 @@ function Capture([System.Drawing.Rectangle]$r) {
     return $bmp
 }
 
-function Fail($msg) { Write-Host "FAIL: $msg"; exit 1 }
+function Fail($msg) {
+    Write-Host "FAIL: $msg"
+    # Save what the widget area looked like before and after, to see why.
+    if ($script:after) {
+        New-Item -ItemType Directory -Force $Artifacts | Out-Null
+        $script:after.Save((Join-Path $Artifacts 'widget.png'))
+        Write-Host "saved the widget capture to $Artifacts"
+    }
+    exit 1
+}
 
 $exePath = (Resolve-Path $Exe).Path
 $data = Join-Path ([IO.Path]::GetTempPath()) "FluentTimerSmoke_$([guid]::NewGuid().ToString('N'))"
@@ -50,10 +59,20 @@ $now = [DateTime]::UtcNow
 
 try {
     $virtual = [System.Windows.Forms.SystemInformation]::VirtualScreen
-    $before = Capture $virtual
+    (Capture $virtual).Dispose() # can we capture the desktop at all?
 } catch {
     Write-Host "SKIP: no desktop available to capture ($($_.Exception.Message))"; exit 0
 }
+
+# A solid magenta backdrop behind where the widget will appear, so the test doesn't depend on whatever else is
+# on screen (a busy desktop changes under the widget). The widget is topmost and created later, so it sits above.
+$key = [System.Drawing.Color]::FromArgb(255, 0, 255)
+$backdrop = New-Object System.Windows.Forms.Form -Property @{
+    FormBorderStyle = 'None'; ShowInTaskbar = $false; TopMost = $true; StartPosition = 'Manual'; BackColor = $key
+    Bounds = New-Object System.Drawing.Rectangle ($left - 160), ($top - 120), 720, 360
+}
+$backdrop.Show()
+[System.Windows.Forms.Application]::DoEvents()
 
 $env:FLUENTTIMER_DEV = '1'; $env:FLUENTTIMER_DATA = $data; $env:FLUENTTIMER_SELFTEST = 'reapply'
 $p = Start-Process -PassThru $exePath -ArgumentList '--minimized'
@@ -74,11 +93,15 @@ try {
     $w = $r.Rt - $r.L; $h = $r.B - $r.T
     Write-Host "widget window at $($r.L),$($r.T) size ${w}x$h"
 
-    $after = Capture $virtual
-    $ox = $r.L - $virtual.Left; $oy = $r.T - $virtual.Top
+    $area = New-Object System.Drawing.Rectangle $r.L, $r.T, $w, $h
+    $b = $backdrop.Bounds
+    if (-not $b.Contains($area)) { Fail "widget ($area) is not over the test backdrop ($b)" }
+    $script:after = Capture $area
+    $after = $script:after
+    # "Same" = the pixel shows the magenta backdrop, i.e. the widget is transparent there.
     function Same([int]$x, [int]$y) {
-        $a = $before.GetPixel($ox + $x, $oy + $y); $b = $after.GetPixel($ox + $x, $oy + $y)
-        $diff = [Math]::Abs([int]$a.R - [int]$b.R) + [Math]::Abs([int]$a.G - [int]$b.G) + [Math]::Abs([int]$a.B - [int]$b.B)
+        $c = $after.GetPixel($x, $y)
+        $diff = [Math]::Abs([int]$c.R - $key.R) + [Math]::Abs([int]$c.G - $key.G) + [Math]::Abs([int]$c.B - $key.B)
         return $diff -le 12
     }
 
@@ -99,5 +122,6 @@ try {
 }
 finally {
     if (-not $p.HasExited) { $p | Stop-Process -Force }
+    $backdrop.Close()
     foreach ($v in 'FLUENTTIMER_DEV', 'FLUENTTIMER_DATA', 'FLUENTTIMER_SELFTEST') { Remove-Item "Env:$v" -ErrorAction SilentlyContinue }
 }

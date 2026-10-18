@@ -61,7 +61,7 @@
                     <Grid Style="{StaticResource Row}">
                         <StackPanel>
                             <TextBlock Text="Launch at startup" Style="{StaticResource BodyText}" />
-                            <TextBlock Text="Starts quietly in the tray when you sign in to Windows" Style="{StaticResource MutedText}" />
+                            <TextBlock Text="{Binding StartupStatus}" Style="{StaticResource MutedText}" />
                         </StackPanel>
                         <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding LaunchAtStartup, Mode=TwoWay}" />
                     </Grid>

@@ -16,6 +16,7 @@ internal sealed class AppHost : IDisposable
     private readonly DispatcherTimer _saveState;
     private readonly DispatcherTimer _saveSettings;
     private bool _locked;
+    private bool _shortcutChecked;
     private int _presenceCounter;
 
     public AppHost()
@@ -227,6 +228,12 @@ internal sealed class AppHost : IDisposable
         ThemeService.Apply(Settings);
         try { if (!AppPaths.IsIsolated) StartupRegistration.Apply(Settings.LaunchAtStartup); }
         catch (UnauthorizedAccessException) { /* locked-down registry: leave setting as-is */ }
+        if (!_shortcutChecked && !AppPaths.IsIsolated)
+        {
+            _shortcutChecked = true;
+            try { StartupRegistration.EnsureStartMenuShortcut(); }
+            catch (Exception e) when (e is System.Runtime.InteropServices.COMException or UnauthorizedAccessException or System.IO.IOException) { }
+        }
         HotkeyErrors = Hotkey.RegisterAll(Enum.GetValues<HotkeyAction>().ToDictionary(a => a, GetHotkey));
         SettingsApplied?.Invoke();
     }
