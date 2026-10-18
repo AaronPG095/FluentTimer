@@ -188,6 +188,39 @@ public partial class PillWindow : Window
         }
     }
 
+    /// <summary>Test hook: expand the list and open the first Repeat toggle's tooltip, as hovering would.</summary>
+    internal void DevShowRepeatTooltip()
+    {
+        _presence.Stop(); // keep it expanded regardless of where the real cursor is
+        SetExpanded(true);
+        Dispatcher.BeginInvoke(() =>
+        {
+            var toggle = FindChild<System.Windows.Controls.Primitives.ToggleButton>(TimerList);
+            if (toggle is null) return;
+            // Assigned as the button's own ToolTip, so it inherits from the button exactly like a hover tooltip.
+            var tip = new ToolTip
+            {
+                Content = toggle.ToolTip,
+                PlacementTarget = toggle,
+                Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom,
+                StaysOpen = true,
+            };
+            toggle.ToolTip = tip;
+            tip.IsOpen = true;
+        }, DispatcherPriority.Loaded);
+    }
+
+    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var i = 0; i < VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) return match;
+            if (FindChild<T>(child) is { } deeper) return deeper;
+        }
+        return null;
+    }
+
     private void SetExpanded(bool expanded)
     {
         if (_expanded == expanded) return;

@@ -266,6 +266,34 @@
         </Setter>
     </Style>
 
+    <!-- Tooltips inherit their owner's font; icon buttons use the icon font, which has no letters (text rendered
+         as boxes). Pin the UI font here, and give tooltips the card look in both themes. -->
+    <Style TargetType="ToolTip">
+        <Setter Property="OverridesDefaultStyle" Value="True" />
+        <Setter Property="HasDropShadow" Value="True" />
+        <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+        <Setter Property="FontSize" Value="12" />
+        <Setter Property="FontWeight" Value="Normal" />
+        <Setter Property="Foreground" Value="{DynamicResource OverlayForegroundBrush}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="ToolTip">
+                    <Border Background="{DynamicResource ColumnCardBrush}" BorderBrush="{DynamicResource ColumnDividerBrush}"
+                            BorderThickness="1" CornerRadius="6" Padding="9,6" MaxWidth="320">
+                        <ContentPresenter>
+                            <ContentPresenter.Resources>
+                                <Style TargetType="TextBlock">
+                                    <Setter Property="TextWrapping" Value="Wrap" />
+                                    <Setter Property="FontFamily" Value="{StaticResource UiFont}" />
+                                </Style>
+                            </ContentPresenter.Resources>
+                        </ContentPresenter>
+                    </Border>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- Menus (tray + widget). Own styles so they look the same before and after WPF-UI is loaded. -->
     <Style TargetType="ContextMenu">
         <Setter Property="OverridesDefaultStyle" Value="True" />
