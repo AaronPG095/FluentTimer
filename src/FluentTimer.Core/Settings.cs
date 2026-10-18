@@ -21,8 +21,12 @@ public sealed class PomodoroSettings
     });
 }
 
+public enum WidgetSize { Small, Medium, Large }
+
 public sealed class PillSettings
 {
+    public WidgetSize Size { get; set; } = WidgetSize.Small;
+
     public double? Left { get; set; }
     public double? Top { get; set; }
     public bool ShowWhenIdle { get; set; } = true;

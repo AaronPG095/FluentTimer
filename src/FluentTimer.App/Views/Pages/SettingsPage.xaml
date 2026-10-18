@@ -125,6 +125,14 @@
                     </Grid>
                     <Grid Style="{StaticResource Row}">
                         <StackPanel>
+                            <TextBlock Text="Widget size" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Also in the widget's right-click menu" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ComboBox HorizontalAlignment="Right" Width="200" ItemsSource="{x:Static vm:SettingsVm.WidgetSizeChoices}"
+                                  SelectedItem="{Binding WidgetSizeChoice, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
                             <TextBlock Text="Fade when the cursor is away" Style="{StaticResource BodyText}" />
                             <TextBlock Text="Dims the widget and lets clicks pass through it until you move the cursor close" Style="{StaticResource MutedText}" />
                         </StackPanel>

@@ -25,6 +25,7 @@ A Windows timer that lives in your tray and starts with Windows. A small floatin
 | Right-click | Menu: presets, Pomodoro, hide widget, quit |
 | Drag | Move; it snaps to the nearest screen edge and grows away from it |
 | Snap to left/right edge | Turns into a slim vertical bar (toggle in Settings) |
+| Right-click → Widget size | Small, Medium (1.35×) or Large (1.75×); also in Settings |
 | Cursor away | Fades and lets clicks pass through until the cursor comes near (toggle in Settings) |
 
 ## Build

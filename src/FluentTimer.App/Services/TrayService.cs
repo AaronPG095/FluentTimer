@@ -77,6 +77,20 @@ internal sealed class TrayService : IDisposable
         menu.Items.Add(new Separator());
         var hidden = host.Settings.Pill.Hidden;
         menu.Items.Add(Item(hidden ? "Show widget" : "Hide widget", () => App.Current.SetPillHidden(!hidden)));
+
+        var sizes = new MenuItem { Header = "Widget size" };
+        foreach (var size in Enum.GetValues<WidgetSize>())
+        {
+            var item = Item(size.ToString(), () =>
+            {
+                host.Settings.Pill.Size = size;
+                host.SettingsChanged();
+            });
+            item.IsCheckable = true;
+            item.IsChecked = host.Settings.Pill.Size == size;
+            sizes.Items.Add(item);
+        }
+        menu.Items.Add(sizes);
         menu.Items.Add(Item("Open Fluent Timer", () => App.Current.ShowMain()));
         menu.Items.Add(Item("Settings", () => App.Current.ShowMain("Settings")));
         menu.Items.Add(new Separator());

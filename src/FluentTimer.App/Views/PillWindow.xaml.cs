@@ -65,8 +65,10 @@ public partial class PillWindow : Window
         Loaded += (_, _) => InitPosition();
 
         host.Ticked += Refresh;
+        ApplySize();
         host.SettingsApplied += () =>
         {
+            ApplySize();
             UpdateVisibility();
             if (_positioned) CaptureAnchor(save: false); // picks up "stand upright on side edges" changes
         };
@@ -156,7 +158,7 @@ public partial class PillWindow : Window
         Rect RectOf(FrameworkElement e)
         {
             var o = e.TranslatePoint(new Point(0, 0), this);
-            return new Rect(Left + o.X, Top + o.Y, e.ActualWidth, e.ActualHeight);
+            return new Rect(Left + o.X, Top + o.Y, e.ActualWidth * _scale, e.ActualHeight * _scale);
         }
         var pill = RectOf(Pill);
         var over = pill.Contains(p) || ListPanel.IsVisible && RectOf(ListPanel).Contains(p) || ContextMenu is { IsOpen: true };
@@ -415,6 +417,38 @@ public partial class PillWindow : Window
     /// <summary>Pill's top-left inside the window (the window has transparent headroom around it).</summary>
     private Point PillOffset() => Pill.TranslatePoint(new Point(0, 0), this);
 
+    // ---- Size --------------------------------------------------------------------------------
+
+    private double _scale = 1;
+
+    /// <summary>On-screen pill size (the whole widget is scaled as vectors by a LayoutTransform).</summary>
+    private double PillW => Pill.ActualWidth * _scale;
+    private double PillH => Pill.ActualHeight * _scale;
+
+    public static double ScaleFor(WidgetSize size) => size switch
+    {
+        WidgetSize.Medium => 1.35,
+        WidgetSize.Large => 1.75,
+        _ => 1.0,
+    };
+
+    /// <summary>Apply Small / Medium / Large. The edge the widget is anchored to stays put; it grows away from it.</summary>
+    private void ApplySize()
+    {
+        var scale = ScaleFor(_host.Settings.Pill.Size);
+        if (Math.Abs(scale - _scale) < 0.001 && Outer.LayoutTransform is ScaleTransform) return;
+        _scale = scale;
+        Outer.LayoutTransform = new ScaleTransform(scale, scale);
+        // Margins aren't scaled by the LayoutTransform; keep proportional headroom for grow/glow alerts.
+        Outer.Margin = new Thickness(60 * scale, 32 * scale, 60 * scale, 32 * scale);
+        if (!_positioned) return;
+        Dispatcher.BeginInvoke(() =>
+        {
+            Reposition();
+            CaptureAnchor(save: false);
+        }, DispatcherPriority.Loaded);
+    }
+
     private void InitPosition()
     {
         var p = _host.Settings.Pill;
@@ -437,8 +471,8 @@ public partial class PillWindow : Window
     {
         if (!_positioned) return;
         var o = PillOffset();
-        var w = Pill.ActualWidth;
-        var h = Pill.ActualHeight;
+        var w = PillW;
+        var h = PillH;
         var x = _anchorRight ? _anchor.X - w : _anchor.X;
         var y = _anchorBottom ? _anchor.Y - h : _anchor.Y;
         Left = x - o.X;
@@ -451,8 +485,8 @@ public partial class PillWindow : Window
         var o = PillOffset();
         var x = Left + o.X;
         var y = Top + o.Y;
-        var w = Pill.ActualWidth;
-        var h = Pill.ActualHeight;
+        var w = PillW;
+        var h = PillH;
         var work = WorkAreaDip(x + w / 2, y + h / 2);
 
         _anchorRight = x + w / 2 > work.Left + work.Width / 2;
@@ -480,8 +514,8 @@ public partial class PillWindow : Window
         var o = PillOffset();
         var x = Left + o.X;
         var y = Top + o.Y;
-        var w = Pill.ActualWidth;
-        var h = Pill.ActualHeight;
+        var w = PillW;
+        var h = PillH;
         var work = WorkAreaDip(x + w / 2, y + h / 2);
 
         if (Math.Abs(x - work.Left) < SnapDistance) x = work.Left + EdgeGap;
@@ -502,7 +536,7 @@ public partial class PillWindow : Window
     {
         if (!_positioned) return SystemParameters.WorkArea;
         var o = PillOffset();
-        return WorkAreaDip(Left + o.X + Pill.ActualWidth / 2, Top + o.Y + Pill.ActualHeight / 2);
+        return WorkAreaDip(Left + o.X + PillW / 2, Top + o.Y + PillH / 2);
     }
 
     /// <summary>
