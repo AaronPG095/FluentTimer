@@ -91,8 +91,14 @@ public partial class PillWindow : Window
         {
             if (hwnd == _hwnd) return;
             BringToTop();
-            // Some apps raise their own topmost windows a moment after activating; catch those too.
-            Dispatcher.BeginInvoke(BringToTop, DispatcherPriority.Background);
+            // Many apps raise their own topmost windows a moment *after* activating (measured: still covered at
+            // 100 ms and 600 ms), so check again shortly after each switch.
+            foreach (var ms in new[] { 50, 150, 600 })
+            {
+                var again = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(ms) };
+                again.Tick += (_, _) => { again.Stop(); BringToTop(); };
+                again.Start();
+            }
         };
         _foregroundHook = Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND,
             IntPtr.Zero, _foregroundProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);
