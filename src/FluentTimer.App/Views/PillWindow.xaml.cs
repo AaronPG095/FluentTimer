@@ -27,7 +27,6 @@ public partial class PillWindow : Window
     private static readonly TimeSpan ExpandDwell = TimeSpan.FromMilliseconds(180);
     private static readonly TimeSpan CollapseDwell = TimeSpan.FromMilliseconds(380);
 
-    private readonly DispatcherTimer _clickDelay;
     private readonly DispatcherTimer _presence;
     private IntPtr _hwnd;
     private DateTime _overSince = DateTime.MaxValue;
@@ -48,8 +47,6 @@ public partial class PillWindow : Window
         InitializeComponent();
         TimerList.ItemsSource = host.Timers;
 
-        _clickDelay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(Native.GetDoubleClickTime()) };
-        _clickDelay.Tick += (_, _) => { _clickDelay.Stop(); OnSingleClick(); };
         // One loop reads the real cursor position and drives hover, fade and click-through.
         // (Event-based hover is unreliable on layered windows and impossible while click-through.)
         _presence = new DispatcherTimer(DispatcherPriority.Input) { Interval = TimeSpan.FromMilliseconds(80) };
@@ -65,6 +62,7 @@ public partial class PillWindow : Window
         Loaded += (_, _) => InitPosition();
 
         host.Ticked += Refresh;
+        host.UserActed += Refresh; // redraw straight away on pause/resume/start, not on the next tick
         ApplySize();
         host.SettingsApplied += () =>
         {
@@ -382,11 +380,16 @@ public partial class PillWindow : Window
 
     // ---- Mouse ------------------------------------------------------------------------------
 
+    private Action? _undoLastClick;
+    private DateTime _lastClickUtc;
+
     private void OnPillMouseDown(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount >= 2)
         {
-            _clickDelay.Stop();
+            // The first click already acted (instantly); a double-click means "open the app", so undo it.
+            if (DateTime.UtcNow - _lastClickUtc <= TimeSpan.FromMilliseconds(Native.GetDoubleClickTime())) _undoLastClick?.Invoke();
+            _undoLastClick = null;
             App.Current.ShowMain();
             return;
         }
@@ -399,20 +402,42 @@ public partial class PillWindow : Window
             SnapToEdges();
             return;
         }
-        _clickDelay.Start();
+        // Act right away rather than waiting out the double-click time (~0.4 s) to see if a second click comes.
+        _lastClickUtc = DateTime.UtcNow;
+        _undoLastClick = OnSingleClick();
     }
 
-    private void OnSingleClick()
+    /// <summary>Test hook: run the single-click path and log how long until the paused state is rendered.</summary>
+    internal void DevMeasureClick()
+    {
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        OnSingleClick();
+        void OnFrame(object? s, EventArgs e)
+        {
+            CompositionTarget.Rendering -= OnFrame;
+            AppHost.Trace($"click-to-frame {sw.Elapsed.TotalMilliseconds:F1} ms, paused glyph visible={PausedGlyph.Visibility == Visibility.Visible}");
+        }
+        CompositionTarget.Rendering += OnFrame;
+    }
+
+    /// <summary>Handles a click and returns how to undo it if it turns out to be the first half of a double-click.</summary>
+    private Action? OnSingleClick()
     {
         AppHost.Trace("pill single click");
         if (_shownAlert is { } a)
         {
             _host.Alerts.Dismiss(a);
-            return;
+            return null; // dismissing can't be undone; the double-click still opens the app
         }
         var first = _host.Timers.FirstOrDefault();
-        if (first is null) App.Current.ShowQuickEntry();
-        else _host.Act(en => en.TogglePause(first.Id));
+        if (first is null)
+        {
+            App.Current.ShowQuickEntry();
+            return null;
+        }
+        var id = first.Id;
+        _host.Act(en => en.TogglePause(id));
+        return () => _host.Act(en => en.TogglePause(id));
     }
 
     private void OnPillRightClick(object sender, MouseButtonEventArgs e)

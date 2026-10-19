@@ -122,13 +122,25 @@ internal sealed class AppHost : IDisposable
     public void StartCountdown(TimeSpan duration, string label = "", bool? repeat = null)
     {
         Engine.StartCountdown(duration, label, repeat: repeat);
-        SyncTimers();
+        AfterUserAction();
     }
 
     public void StartPomodoro(string label = "")
     {
         Engine.StartPomodoro(label);
+        AfterUserAction();
+    }
+
+    /// <summary>
+    /// Raised right after the user changes a timer (start, pause, reset…), so views redraw immediately
+    /// instead of on the next 4 Hz tick.
+    /// </summary>
+    public event Action? UserActed;
+
+    private void AfterUserAction()
+    {
         SyncTimers();
+        UserActed?.Invoke();
     }
 
     /// <summary>Runs parsed quick-entry text. Returns a short confirmation for the UI.</summary>
@@ -167,7 +179,7 @@ internal sealed class AppHost : IDisposable
     public void Act(Action<TimerEngine> action)
     {
         action(Engine);
-        SyncTimers();
+        AfterUserAction();
     }
 
     public void StateEdited() => Restart(_saveState);

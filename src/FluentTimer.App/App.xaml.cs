@@ -57,13 +57,14 @@ public partial class App : Application
         //   FLUENTTIMER_SELFTEST=reapply  re-applies settings after 3 s, like dropping the widget does
         //   FLUENTTIMER_SELFTEST=update   checks GitHub Releases and installs a newer version
         var selfTest = AppPaths.IsIsolated ? Environment.GetEnvironmentVariable("FLUENTTIMER_SELFTEST") : null;
-        if (selfTest is "tooltip" or "rename")
+        if (selfTest is "tooltip" or "rename" or "click")
         {
             var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             t.Tick += (_, _) =>
             {
                 t.Stop();
                 if (selfTest == "tooltip") _pill.DevShowRepeatTooltip();
+                else if (selfTest == "click") _pill.DevMeasureClick();
                 else if (_host.Timers.FirstOrDefault() is { } first) ShowRename(first.Id);
             };
             t.Start();
