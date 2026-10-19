@@ -136,6 +136,35 @@ public class TimerEngineTests
     }
 
     [Fact]
+    public void Rename_changes_label_and_logged_session_uses_new_name()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartCountdown(10 * Min);
+        Assert.Equal("Timer", t.DisplayLabel);
+
+        f.Engine.Rename(t.Id, "  Deep work  ");
+        Assert.Equal("Deep work", t.Label);
+        Assert.Equal("Deep work", t.DisplayLabel);
+
+        f.Advance(10 * Min);
+        Assert.Equal("Deep work", f.Alerts[0].Title);
+        f.Engine.Dismiss(f.Alerts[0]);
+        Assert.Equal("Deep work", Assert.Single(f.Sessions).Label);
+    }
+
+    [Fact]
+    public void Rename_trims_caps_length_and_allows_clearing()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartPomodoro("Thesis");
+        f.Engine.Rename(t.Id, new string('x', 80));
+        Assert.Equal(60, t.Label.Length);
+        f.Engine.Rename(t.Id, "   ");
+        Assert.Equal("", t.Label);
+        Assert.Equal("Focus", t.DisplayLabel); // falls back to the phase name
+    }
+
+    [Fact]
     public void Cancel_logs_partial_session()
     {
         var f = new EngineFixture();

@@ -65,6 +65,20 @@ internal sealed class TrayService : IDisposable
                     if (anyRunning) e.Pause(t.Id); else e.Resume(t.Id);
             })));
         }
+        // Rename: straight to the box for one timer, a submenu to pick one when several are running.
+        if (host.Timers.Count == 1)
+        {
+            var only = host.Timers[0];
+            menu.Items.Add(Item("Rename timer…", () => App.Current.ShowRename(only.Id)));
+        }
+        else if (host.Timers.Count > 1)
+        {
+            var rename = new MenuItem { Header = "Rename timer" };
+            foreach (var t in host.Timers.ToList())
+                rename.Items.Add(Item($"{t.Label}  ·  {t.TimeText}", () => App.Current.ShowRename(t.Id)));
+            menu.Items.Add(rename);
+        }
+
         if (host.Alerts.Current is not null)
             menu.Items.Add(Item("Dismiss alerts", host.Alerts.DismissAll));
 

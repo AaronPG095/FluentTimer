@@ -47,8 +47,11 @@
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
                                 <StackPanel>
-                                    <TextBlock Text="{Binding Label}" FontSize="15" FontWeight="SemiBold" Foreground="{DynamicResource OverlayForegroundBrush}"
-                                               TextTrimming="CharacterEllipsis" />
+                                    <TextBox Style="{StaticResource InlineEdit}" Text="{Binding Name, UpdateSourceTrigger=LostFocus}"
+                                             Tag="{Binding NamePlaceholder}" MaxWidth="420" HorizontalAlignment="Left" MinWidth="200"
+                                             ToolTip="Click to name or rename this timer" AutomationProperties.Name="Timer name"
+                                             PreviewKeyDown="OnNameKeyDown" />
+
                                     <TextBlock Text="{Binding Subtitle}" Style="{StaticResource MutedText}" Margin="0,2,0,0" />
                                     <TextBlock x:Name="Time" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}" FontSize="34" FontWeight="SemiBold"
                                                Foreground="{DynamicResource OverlayForegroundBrush}" Margin="0,6,0,6" />

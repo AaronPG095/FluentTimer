@@ -48,7 +48,10 @@
                                     <ColumnDefinition Width="Auto" />
                                     <ColumnDefinition Width="Auto" />
                                 </Grid.ColumnDefinitions>
-                                <TextBlock Text="{Binding Label}" Style="{StaticResource BodyText}" TextTrimming="CharacterEllipsis" MaxWidth="150" Margin="6,0,10,0" />
+                                <TextBlock Text="{Binding Label}" Style="{StaticResource BodyText}" TextTrimming="CharacterEllipsis" MaxWidth="150" Margin="6,0,10,0"
+                                           Tag="{Binding Id}" Cursor="IBeam" Background="Transparent" MouseLeftButtonDown="OnLabelMouseDown"
+                                           ToolTip="Double-click to rename" />
+
                                 <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}" FontSize="13" FontWeight="SemiBold"
                                            Foreground="{DynamicResource OverlayForegroundBrush}" VerticalAlignment="Center" Margin="0,0,6,0" />
                                 <Button Grid.Column="2" Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="12"

@@ -67,6 +67,17 @@ public partial class TimersPage : UserControl
         Quick.Clear();
     }
 
+    /// <summary>Enter saves the name (by leaving the box), Esc puts the old name back.</summary>
+    private void OnNameKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox box || e.Key is not (Key.Enter or Key.Escape)) return;
+        var binding = box.GetBindingExpression(TextBox.TextProperty);
+        if (e.Key == Key.Enter) binding?.UpdateSource();
+        else binding?.UpdateTarget(); // Esc: back to the saved name
+        e.Handled = true;
+        Quick.Focus(); // leave the box so it reads as plain text again
+    }
+
     private static Guid Id(object sender) => (Guid)((FrameworkElement)sender).Tag;
 
     private void OnPause(object sender, RoutedEventArgs e) => _host.Act(en => en.TogglePause(Id(sender)));

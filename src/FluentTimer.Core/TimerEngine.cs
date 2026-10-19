@@ -142,6 +142,16 @@ public sealed class TimerEngine
 
     // ---- Alert responses ----------------------------------------------------------------------
 
+    /// <summary>Name (or rename) a timer at any time. Its sessions are logged under the name it has when they end.</summary>
+    public void Rename(Guid id, string name)
+    {
+        var clean = (name ?? "").Trim();
+        if (clean.Length > 60) clean = clean[..60];
+        if (Find(id) is not { } t || t.Label == clean) return;
+        t.Label = clean;
+        Changed?.Invoke();
+    }
+
     public void SetRepeat(Guid id, bool repeat)
     {
         if (Find(id) is not { Kind: TimerKind.Countdown } t || t.Repeat == repeat) return;

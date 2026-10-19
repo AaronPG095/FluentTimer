@@ -148,6 +148,50 @@
         </Setter>
     </Style>
 
+    <!-- Inline-editable title (timer names): reads as plain text, shows an input frame on hover/focus -->
+    <Style x:Key="InlineEdit" TargetType="TextBox">
+        <Setter Property="Foreground" Value="{DynamicResource OverlayForegroundBrush}" />
+        <Setter Property="CaretBrush" Value="{DynamicResource OverlayForegroundBrush}" />
+        <Setter Property="SelectionBrush" Value="{DynamicResource OverlayAccentBrush}" />
+        <Setter Property="FontSize" Value="15" />
+        <Setter Property="FontWeight" Value="SemiBold" />
+        <Setter Property="Padding" Value="6,3" />
+        <Setter Property="Margin" Value="-7,-4,0,-4" />
+        <Setter Property="MaxLength" Value="60" />
+        <Setter Property="FocusVisualStyle" Value="{x:Null}" />
+        <Setter Property="Template">
+            <Setter.Value>
+                <ControlTemplate TargetType="TextBox">
+                    <Grid>
+                        <Border x:Name="Bd" CornerRadius="6" Background="Transparent" BorderBrush="Transparent" BorderThickness="0,0,0,2" />
+                        <!-- The text view adds its own inset, so the host gets no left margin: typed text lines up with the placeholder. -->
+                        <ScrollViewer x:Name="PART_ContentHost" Margin="0,3,6,3" VerticalAlignment="Center" />
+                        <TextBlock x:Name="Placeholder" Text="{TemplateBinding Tag}" Margin="{TemplateBinding Padding}" Padding="2,0,0,0"
+                                   Foreground="{DynamicResource FooterForeground}" FontWeight="Normal" IsHitTestVisible="False"
+                                   VerticalAlignment="Center" Visibility="Collapsed" />
+                        <TextBlock x:Name="Pencil" Text="&#xE70F;" FontFamily="{StaticResource IconFont}" FontSize="11"
+                                   Foreground="{DynamicResource FooterForeground}" HorizontalAlignment="Right" VerticalAlignment="Center"
+                                   Margin="0,0,8,0" Opacity="0" IsHitTestVisible="False" />
+                    </Grid>
+                    <ControlTemplate.Triggers>
+                        <Trigger Property="Text" Value="">
+                            <Setter TargetName="Placeholder" Property="Visibility" Value="Visible" />
+                        </Trigger>
+                        <Trigger Property="IsMouseOver" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource TabHoverBackground}" />
+                            <Setter TargetName="Pencil" Property="Opacity" Value="1" />
+                        </Trigger>
+                        <Trigger Property="IsKeyboardFocused" Value="True">
+                            <Setter TargetName="Bd" Property="Background" Value="{DynamicResource SearchBarBackground}" />
+                            <Setter TargetName="Bd" Property="BorderBrush" Value="{DynamicResource OverlayAccentBrush}" />
+                            <Setter TargetName="Pencil" Property="Opacity" Value="0" />
+                        </Trigger>
+                    </ControlTemplate.Triggers>
+                </ControlTemplate>
+            </Setter.Value>
+        </Setter>
+    </Style>
+
     <!-- On/off chip (e.g. Repeat): ChipButton look, accent outline + tint when on -->
     <Style x:Key="ChipToggle" TargetType="ToggleButton">
         <Setter Property="Foreground" Value="{DynamicResource OverlayForegroundBrush}" />

@@ -19,6 +19,22 @@ public sealed class TimerVm : ObservableObject
     public bool IsPomodoro => Model.Kind == TimerKind.Pomodoro;
     public bool IsCountdown => Model.Kind == TimerKind.Countdown;
 
+    private string _name = "";
+    /// <summary>The user's own name for the timer (empty = unnamed). Two-way: edits write through the engine.</summary>
+    public string Name
+    {
+        get => _name;
+        set
+        {
+            var clean = (value ?? "").Trim();
+            if (!SetProperty(ref _name, clean)) return;
+            Services.AppHost.Current.Act(e => e.Rename(Id, clean));
+        }
+    }
+
+    /// <summary>Shown in the name box when the timer has no name yet.</summary>
+    public string NamePlaceholder => IsPomodoro ? "Name this focus session" : IsBreak ? "Break" : "Name this timer";
+
     private bool _repeat;
     /// <summary>Two-way: the toggle writes through the engine.</summary>
     public bool Repeat
@@ -71,12 +87,14 @@ public sealed class TimerVm : ObservableObject
     {
         State = Model.State;
         if (_repeat != Model.Repeat) { _repeat = Model.Repeat; OnPropertyChanged(nameof(Repeat)); }
+        // Only notify when the name changed elsewhere (widget rename box), so typing in the box isn't overwritten.
+        if (_name != Model.Label) { _name = Model.Label; OnPropertyChanged(nameof(Name)); }
         Label = Model.DisplayLabel;
         TimeText = TimeFormat.Countdown(Model.Remaining(utcNow));
         Progress = Model.Progress(utcNow);
         Subtitle = Model.Kind switch
         {
-            TimerKind.Pomodoro => $"Session {Model.CompletedWorkSessions + (Model.Phase == PomodoroPhase.Work ? 1 : 0)} · {TimeFormat.Friendly(Model.Duration)}",
+            TimerKind.Pomodoro => $"{TimerItem.PhaseName(Model.Phase)} · session {Model.CompletedWorkSessions + (Model.Phase == PomodoroPhase.Work ? 1 : 0)} · {TimeFormat.Friendly(Model.Duration)}",
             TimerKind.Break => $"Break · {TimeFormat.Friendly(Model.Duration)}",
             _ => IsRinging ? "Time's up" : TimeFormat.Friendly(Model.Duration),
         };

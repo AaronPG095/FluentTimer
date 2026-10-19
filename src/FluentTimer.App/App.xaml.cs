@@ -57,10 +57,15 @@ public partial class App : Application
         //   FLUENTTIMER_SELFTEST=reapply  re-applies settings after 3 s, like dropping the widget does
         //   FLUENTTIMER_SELFTEST=update   checks GitHub Releases and installs a newer version
         var selfTest = AppPaths.IsIsolated ? Environment.GetEnvironmentVariable("FLUENTTIMER_SELFTEST") : null;
-        if (selfTest == "tooltip")
+        if (selfTest is "tooltip" or "rename")
         {
             var t = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
-            t.Tick += (_, _) => { t.Stop(); _pill.DevShowRepeatTooltip(); };
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                if (selfTest == "tooltip") _pill.DevShowRepeatTooltip();
+                else if (_host.Timers.FirstOrDefault() is { } first) ShowRename(first.Id);
+            };
             t.Start();
         }
         if (selfTest is "reapply" or "update")
@@ -133,6 +138,14 @@ public partial class App : Application
                 SetPillHidden(!_host.Settings.Pill.Hidden);
                 break;
         }
+    }
+
+    /// <summary>Open the rename box for a timer, on the widget's monitor.</summary>
+    public void ShowRename(Guid timerId)
+    {
+        if (_host is null || _host.Timers.All(t => t.Id != timerId)) return;
+        EnsureFluentUi();
+        new RenameWindow(_host, timerId, WidgetWorkArea()).Show();
     }
 
     /// <summary>Merge WPF-UI's theme and control styles the first time a window that uses them opens.</summary>
