@@ -57,7 +57,9 @@ public partial class PillWindow : Window
         {
             _hwnd = new WindowInteropHelper(this).Handle;
             Native.AddExStyle(_hwnd, Native.WS_EX_TOOLWINDOW | Native.WS_EX_NOACTIVATE);
+            StartStayingOnTop();
         };
+        Closed += (_, _) => { if (_foregroundHook != IntPtr.Zero) Native.UnhookWinEvent(_foregroundHook); };
         IsVisibleChanged += (_, _) => { if (IsVisible) _presence.Start(); else _presence.Stop(); };
         Loaded += (_, _) => InitPosition();
 
@@ -72,6 +74,37 @@ public partial class PillWindow : Window
         };
         host.Alerts.CurrentChanged += OnAlertChanged;
         Refresh();
+    }
+
+    // ---- Staying on top -----------------------------------------------------------------------
+
+    // Other always-on-top windows (overlays, launchers, some players) share Windows' topmost layer, and whichever
+    // was activated last sits above the rest. So the widget re-asserts its place whenever the foreground app changes,
+    // plus a light periodic check for windows that push themselves up without taking focus.
+    private IntPtr _foregroundHook;
+    private Native.WinEventProc? _foregroundProc; // kept in a field so the GC can't collect the callback
+    private DispatcherTimer? _topmostTimer;
+
+    private void StartStayingOnTop()
+    {
+        _foregroundProc = (_, _, hwnd, _, _, _, _) =>
+        {
+            if (hwnd == _hwnd) return;
+            BringToTop();
+            // Some apps raise their own topmost windows a moment after activating; catch those too.
+            Dispatcher.BeginInvoke(BringToTop, DispatcherPriority.Background);
+        };
+        _foregroundHook = Native.SetWinEventHook(Native.EVENT_SYSTEM_FOREGROUND, Native.EVENT_SYSTEM_FOREGROUND,
+            IntPtr.Zero, _foregroundProc, 0, 0, Native.WINEVENT_OUTOFCONTEXT);
+
+        _topmostTimer = new DispatcherTimer(TimeSpan.FromSeconds(2), DispatcherPriority.Background, (_, _) => BringToTop(), Dispatcher);
+        _topmostTimer.Start();
+    }
+
+    private void BringToTop()
+    {
+        if (_hwnd == IntPtr.Zero || !IsVisible || ContextMenu is { IsOpen: true }) return;
+        Native.BringToTopmost(_hwnd);
     }
 
     // ---- Visibility & content ---------------------------------------------------------------
