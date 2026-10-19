@@ -17,14 +17,17 @@ internal sealed class SingleInstance : IDisposable
         _wait = ThreadPool.RegisterWaitForSingleObject(_activate, (_, _) => onActivate(), null, Timeout.Infinite, executeOnlyOnce: false);
     }
 
-    /// <summary>Returns null when another instance is already running (and has been signalled).</summary>
-    public static SingleInstance? TryAcquire(Action onActivate)
+    /// <summary>
+    /// Returns null when another instance is already running. <paramref name="signalExisting"/>: ask it to show its
+    /// window (a manual launch) — false for silent launches, e.g. a second startup route firing at sign-in.
+    /// </summary>
+    public static SingleInstance? TryAcquire(Action onActivate, bool signalExisting = true)
     {
         var mutex = new Mutex(initiallyOwned: true, MutexName, out var createdNew);
         var activate = new EventWaitHandle(false, EventResetMode.AutoReset, EventName);
         if (!createdNew)
         {
-            activate.Set();
+            if (signalExisting) activate.Set();
             activate.Dispose();
             mutex.Dispose();
             return null;

@@ -21,7 +21,9 @@ public partial class App : Application
     protected override void OnStartup(StartupEventArgs e)
     {
         UpdateService.FinishPreviousUpdate(e.Args); // waits for the old process after a self-update
-        _instance = SingleInstance.TryAcquire(() => Dispatcher.BeginInvoke(() => ShowMain()));
+        // A --minimized launch (Run key or Startup folder at sign-in) never pops the window of an already-running copy.
+        _instance = SingleInstance.TryAcquire(() => Dispatcher.BeginInvoke(() => ShowMain()),
+            signalExisting: !e.Args.Contains(StartupRegistration.MinimizedArg));
         if (_instance is null)
         {
             Shutdown();
