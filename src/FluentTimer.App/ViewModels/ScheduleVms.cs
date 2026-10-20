@@ -134,6 +134,67 @@ public sealed class ReminderVm : ObservableObject
     private static string Short(TimeSpan t) => t.TotalSeconds < 60 ? $"{t.TotalSeconds:0}s" : $"{t.TotalMinutes:0}m";
 }
 
+/// <summary>Editable view of a saved timer; edits write straight through to the model.</summary>
+public sealed class SavedTimerVm : ObservableObject
+{
+    private readonly AppHost _host;
+    private string _durationText;
+
+    internal SavedTimerVm(SavedTimer model, AppHost host)
+    {
+        Model = model;
+        _host = host;
+        _durationText = Short(model.Duration);
+    }
+
+    public SavedTimer Model { get; }
+
+    public string Name
+    {
+        get => Model.Name;
+        set
+        {
+            var clean = (value ?? "").Trim();
+            if (clean == Model.Name) return;
+            Model.Name = clean.Length > 60 ? clean[..60] : clean;
+            OnPropertyChanged();
+            _host.StateEdited();
+        }
+    }
+
+    /// <summary>Length as typed: "25m", "1h", "1h30", "90s", "5:00".</summary>
+    public string DurationText
+    {
+        get => _durationText;
+        set
+        {
+            if (QuickEntryParser.TryParseDuration(value, out var d))
+            {
+                Model.Duration = d;
+                _durationText = Short(d);
+                _host.StateEdited();
+            }
+            OnPropertyChanged(); // invalid input snaps back to the last good value
+        }
+    }
+
+    public bool Repeat
+    {
+        get => Model.Repeat;
+        set { Model.Repeat = value; OnPropertyChanged(); _host.StateEdited(); }
+    }
+
+    internal static string Short(TimeSpan t)
+    {
+        if (t < TimeSpan.FromMinutes(1)) return $"{t.TotalSeconds:0}s";
+        var h = (int)t.TotalHours;
+        var m = t.Minutes;
+        var s = t.Seconds;
+        var text = (h > 0 ? $"{h}h" : "") + (m > 0 ? $"{m}m" : "") + (s > 0 ? $"{s}s" : "");
+        return text.Length > 0 ? text : "0m";
+    }
+}
+
 public sealed class AlarmVm : ObservableObject
 {
     private readonly AppHost _host;

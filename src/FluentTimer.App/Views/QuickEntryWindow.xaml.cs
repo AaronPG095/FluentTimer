@@ -17,6 +17,9 @@ public partial class QuickEntryWindow : Window
         _host = host;
         InitializeComponent();
 
+        // Saved timers first (with their own names), then the plain presets.
+        foreach (var saved in host.State.SavedTimers)
+            Presets.Children.Add(Preset($"{saved.DisplayName} · {TimeFormat.Friendly(saved.Duration)}", () => host.StartSaved(saved)));
         foreach (var m in host.Settings.PresetMinutes)
             Presets.Children.Add(Preset($"{m} min", () => host.StartCountdown(TimeSpan.FromMinutes(m), Input.Text.Trim())));
         Presets.Children.Add(Preset("Pomodoro", () => host.StartPomodoro(Input.Text.Trim())));

@@ -17,8 +17,76 @@ public partial class TimersPage : UserControl
         TimerItems.ItemsSource = host.Timers;
         host.Timers.CollectionChanged += (_, _) => UpdateEmpty();
         host.SettingsApplied += BuildPresets;
+        host.SavedTimersChanged += SyncSaved;
         BuildPresets();
         UpdateEmpty();
+        SavedItems.ItemsSource = _saved;
+        SyncSaved();
+    }
+
+    // ---- Saved timers -----------------------------------------------------------------------
+
+    private readonly System.Collections.ObjectModel.ObservableCollection<ViewModels.SavedTimerVm> _saved = [];
+
+    private void SyncSaved()
+    {
+        var models = _host.State.SavedTimers;
+        foreach (var vm in _saved.Where(vm => !models.Contains(vm.Model)).ToList()) _saved.Remove(vm);
+        foreach (var m in models)
+            if (_saved.All(vm => vm.Model != m)) _saved.Add(new ViewModels.SavedTimerVm(m, _host));
+        SavedEmpty.Visibility = _saved.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void OnAddSaved(object sender, RoutedEventArgs e)
+    {
+        _host.AddSavedTimer();
+        // Put the cursor straight into the new card's name box.
+        Dispatcher.BeginInvoke(() =>
+        {
+            if (SavedItems.ItemContainerGenerator.ContainerFromIndex(_saved.Count - 1) is DependencyObject card &&
+                FindChild<TextBox>(card) is { } box)
+                box.Focus();
+        }, System.Windows.Threading.DispatcherPriority.Loaded);
+    }
+
+    private void OnDeleteSaved(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is ViewModels.SavedTimerVm vm) _host.DeleteSavedTimer(vm.Model);
+    }
+
+    private void OnStartSaved(object sender, RoutedEventArgs e)
+    {
+        if (((FrameworkElement)sender).Tag is not ViewModels.SavedTimerVm vm) return;
+        Keyboard.ClearFocus(); // commit any half-typed edit first
+        _host.StartSaved(vm.Model);
+    }
+
+    private void OnSaveRunning(object sender, RoutedEventArgs e)
+    {
+        if (_host.SaveTimer(Id(sender)) is { } saved)
+            QuickPreview.Text = $"Saved \"{saved.DisplayName}\" ({TimeFormat.Friendly(saved.Duration)}) to your saved timers";
+    }
+
+    /// <summary>Enter commits a saved-timer field, Esc puts the previous value back.</summary>
+    private void OnSavedFieldKeyDown(object sender, KeyEventArgs e)
+    {
+        if (sender is not TextBox box || e.Key is not (Key.Enter or Key.Escape)) return;
+        var binding = box.GetBindingExpression(TextBox.TextProperty);
+        if (e.Key == Key.Enter) binding?.UpdateSource();
+        else binding?.UpdateTarget();
+        e.Handled = true;
+        Quick.Focus();
+    }
+
+    private static T? FindChild<T>(DependencyObject parent) where T : DependencyObject
+    {
+        for (var i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(parent); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(parent, i);
+            if (child is T match) return match;
+            if (FindChild<T>(child) is { } deeper) return deeper;
+        }
+        return null;
     }
 
     private void BuildPresets()

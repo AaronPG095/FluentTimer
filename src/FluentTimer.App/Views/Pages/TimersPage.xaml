@@ -30,6 +30,62 @@
                 </StackPanel>
             </Border>
 
+            <!-- Saved timers: named countdowns started with one click -->
+            <Grid Margin="0,16,0,8">
+                <TextBlock Text="Saved timers" Style="{StaticResource SectionTitle}" Margin="0" VerticalAlignment="Center" />
+                <Button Style="{StaticResource ChipButton}" HorizontalAlignment="Right" Padding="10,4" Click="OnAddSaved">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource Glyph}" Text="&#xE710;" FontSize="11" Margin="0,0,6,0" />
+                        <TextBlock Text="Add saved timer" FontSize="12" />
+                    </StackPanel>
+                </Button>
+            </Grid>
+            <TextBlock x:Name="SavedEmpty" Style="{StaticResource MutedText}" Margin="2,0,0,4"
+                       Text="Keep timers you use often here. Click Save on a running timer, or add one, then start it with one click." />
+            <ItemsControl x:Name="SavedItems">
+                <ItemsControl.ItemsPanel>
+                    <ItemsPanelTemplate>
+                        <WrapPanel />
+                    </ItemsPanelTemplate>
+                </ItemsControl.ItemsPanel>
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Border Style="{StaticResource Card}" Width="300" Margin="0,0,6,6" Padding="14,10">
+                            <StackPanel>
+                                <Grid>
+                                    <TextBox Style="{StaticResource InlineEdit}" Text="{Binding Name, UpdateSourceTrigger=LostFocus}" Tag="Name this timer"
+                                             MinWidth="180" MaxWidth="230" HorizontalAlignment="Left" FontSize="14"
+                                             AutomationProperties.Name="Saved timer name" PreviewKeyDown="OnSavedFieldKeyDown" />
+                                    <Button Style="{StaticResource IconButton}" Width="28" Height="28" FontSize="12" Content="&#xE74D;"
+                                            HorizontalAlignment="Right" ToolTip="Delete saved timer" AutomationProperties.Name="Delete saved timer"
+                                            Tag="{Binding}" Click="OnDeleteSaved" />
+                                </Grid>
+                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                    <TextBox Style="{StaticResource InlineEdit}" Text="{Binding DurationText, UpdateSourceTrigger=LostFocus}"
+                                             Width="76" Margin="-7,0,6,0" FontSize="13" FontWeight="Normal" Tag="25m"
+                                             FontFamily="{StaticResource MonoFont}" ToolTip="Length, e.g. 25m, 1h, 1h30, 90s"
+                                             AutomationProperties.Name="Saved timer length" PreviewKeyDown="OnSavedFieldKeyDown" />
+                                    <ToggleButton Style="{StaticResource ChipToggle}" Padding="10,4" Margin="0,0,6,0" IsChecked="{Binding Repeat, Mode=TwoWay}"
+                                                  ToolTip="Repeat: dismissing the finished timer starts it again" AutomationProperties.Name="Repeat">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE8EE;" FontSize="11" Margin="0,0,5,0" />
+                                            <TextBlock Text="Repeat" FontSize="12" />
+                                        </StackPanel>
+                                    </ToggleButton>
+                                    <Button Style="{StaticResource AccentButton}" Padding="12,4" Tag="{Binding}" Click="OnStartSaved"
+                                            AutomationProperties.Name="Start saved timer">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE768;" FontSize="11" Margin="0,0,6,0" Foreground="White" />
+                                            <TextBlock Text="Start" FontSize="12" />
+                                        </StackPanel>
+                                    </Button>
+                                </StackPanel>
+                            </StackPanel>
+                        </Border>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+
             <TextBlock Text="Running" Style="{StaticResource SectionTitle}" Margin="0,16,0,8" />
             <Border x:Name="Empty" Style="{StaticResource Card}" Padding="16,20">
                 <TextBlock Style="{StaticResource MutedText}" TextAlignment="Center" HorizontalAlignment="Center">
@@ -84,6 +140,8 @@
                                     <Button Style="{StaticResource ChipButton}" Content="+5 min" Margin="0,0,6,0" Tag="{Binding Id}" Click="OnAdd5" />
                                     <Button x:Name="Skip" Style="{StaticResource IconButton}" Content="&#xE893;" ToolTip="Skip to next phase"
                                             Tag="{Binding Id}" Click="OnSkip" Visibility="Collapsed" />
+                                    <Button x:Name="SaveBtn" Style="{StaticResource IconButton}" Content="&#xE74E;" ToolTip="Save as a saved timer"
+                                            AutomationProperties.Name="Save timer" Tag="{Binding Id}" Click="OnSaveRunning" Visibility="Collapsed" />
                                     <Button Style="{StaticResource IconButton}" Content="&#xE711;" ToolTip="Cancel" Tag="{Binding Id}" Click="OnCancel" />
                                 </StackPanel>
                             </Grid>
@@ -94,6 +152,7 @@
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsCountdown}" Value="True">
                                 <Setter TargetName="RepeatToggle" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="SaveBtn" Property="Visibility" Value="Visible" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsRinging}" Value="True">
                                 <Setter TargetName="Time" Property="Foreground" Value="{DynamicResource AlertBrush}" />

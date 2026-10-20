@@ -69,6 +69,7 @@ public sealed class AppSettings
 public sealed class AppState
 {
     public List<TimerItem> Timers { get; set; } = [];
+    public List<SavedTimer> SavedTimers { get; set; } = [];
     public List<IntervalReminder> Reminders { get; set; } = [];
     public List<Alarm> Alarms { get; set; } = [];
 

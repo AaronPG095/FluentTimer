@@ -15,6 +15,7 @@ public class StorageAndReportTests
             Timers = [new TimerItem { Label = "Tea", Duration = TimeSpan.FromMinutes(4), EndsAtUtc = end, Kind = TimerKind.Pomodoro, Phase = PomodoroPhase.LongBreak }],
             Alarms = [new Alarm { Time = new TimeOnly(7, 30), RepeatDays = [DayOfWeek.Monday] }],
             Reminders = [new IntervalReminder { BreakDuration = TimeSpan.FromSeconds(20) }],
+            SavedTimers = [new SavedTimer { Name = "Tea", Duration = TimeSpan.FromMinutes(4), Repeat = true }],
         };
 
         store.Save(state);
@@ -26,6 +27,8 @@ public class StorageAndReportTests
         Assert.Equal(PomodoroPhase.LongBreak, t.Phase);
         Assert.Equal(new TimeOnly(7, 30), loaded.Alarms[0].Time);
         Assert.Equal(TimeSpan.FromSeconds(20), loaded.Reminders[0].BreakDuration);
+        var saved = Assert.Single(loaded.SavedTimers);
+        Assert.Equal(("Tea", TimeSpan.FromMinutes(4), true), (saved.Name, saved.Duration, saved.Repeat));
         Directory.Delete(dir, true);
     }
 

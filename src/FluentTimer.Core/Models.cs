@@ -62,6 +62,17 @@ public sealed class TimerItem
     };
 }
 
+/// <summary>A named countdown you start with one click (like a reminder, but on demand).</summary>
+public sealed class SavedTimer
+{
+    public Guid Id { get; set; } = Guid.NewGuid();
+    public string Name { get; set; } = "";
+    public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(25);
+    public bool Repeat { get; set; }
+
+    public string DisplayName => string.IsNullOrWhiteSpace(Name) ? TimeFormat.Friendly(Duration) : Name;
+}
+
 public sealed class IntervalReminder
 {
     public Guid Id { get; set; } = Guid.NewGuid();

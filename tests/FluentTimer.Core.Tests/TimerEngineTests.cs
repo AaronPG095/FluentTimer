@@ -165,6 +165,38 @@ public class TimerEngineTests
     }
 
     [Fact]
+    public void Saved_timer_starts_with_its_name_length_and_repeat()
+    {
+        var f = new EngineFixture();
+        var saved = new SavedTimer { Name = "Deep work", Duration = 60 * Min, Repeat = true };
+        var t = f.Engine.StartSaved(saved);
+        Assert.Equal("Deep work", t.Label);
+        Assert.Equal(60 * Min, t.Remaining(f.Clock.UtcNow));
+        Assert.True(t.Repeat);
+
+        // Starting it twice gives two independent timers; the saved entry is untouched.
+        f.Engine.StartSaved(saved);
+        Assert.Equal(2, f.State.Timers.Count);
+        Assert.Equal(60 * Min, saved.Duration);
+    }
+
+    [Fact]
+    public void Running_timer_can_be_saved_using_its_original_length()
+    {
+        var f = new EngineFixture();
+        var t = f.Engine.StartCountdown(45 * Min, "Stretch", repeat: true);
+        f.Engine.AddTime(t.Id, 5 * Min);
+        f.Advance(10 * Min);
+
+        var saved = f.Engine.SaveAsTimer(t.Id);
+
+        Assert.NotNull(saved);
+        Assert.Same(saved, Assert.Single(f.State.SavedTimers));
+        Assert.Equal(("Stretch", 45 * Min, true), (saved.Name, saved.Duration, saved.Repeat));
+        Assert.Null(f.Engine.SaveAsTimer(f.Engine.StartPomodoro().Id)); // only countdowns
+    }
+
+    [Fact]
     public void Cancel_logs_partial_session()
     {
         var f = new EngineFixture();

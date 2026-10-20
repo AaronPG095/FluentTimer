@@ -56,6 +56,25 @@ public sealed class TimerEngine
         return timer;
     }
 
+    /// <summary>Start a countdown from a saved timer (its name, length and repeat setting).</summary>
+    public TimerItem StartSaved(SavedTimer saved) =>
+        StartCountdown(saved.Duration, saved.Name, repeat: saved.Repeat);
+
+    /// <summary>Save a running (or finished) countdown so it can be started again later. Returns the new entry.</summary>
+    public SavedTimer? SaveAsTimer(Guid timerId)
+    {
+        if (Find(timerId) is not { Kind: TimerKind.Countdown } t) return null;
+        var saved = new SavedTimer
+        {
+            Name = t.Label,
+            Duration = t.InitialDuration > TimeSpan.Zero ? t.InitialDuration : t.Duration,
+            Repeat = t.Repeat,
+        };
+        State.SavedTimers.Add(saved);
+        Changed?.Invoke();
+        return saved;
+    }
+
     public TimerItem StartPomodoro(string label = "")
     {
         var timer = new TimerItem { Kind = TimerKind.Pomodoro, Label = label.Trim(), Phase = PomodoroPhase.Work };

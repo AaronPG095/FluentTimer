@@ -131,6 +131,41 @@ internal sealed class AppHost : IDisposable
         AfterUserAction();
     }
 
+    // ---- Saved timers -------------------------------------------------------------------------
+
+    /// <summary>Raised when saved timers are added or removed (edits to one are written in place).</summary>
+    public event Action? SavedTimersChanged;
+
+    public void StartSaved(SavedTimer saved)
+    {
+        Engine.StartSaved(saved);
+        AfterUserAction();
+    }
+
+    /// <summary>Save a running countdown so it can be started again with one click.</summary>
+    public SavedTimer? SaveTimer(Guid timerId)
+    {
+        var saved = Engine.SaveAsTimer(timerId);
+        if (saved is not null) SavedTimersChanged?.Invoke();
+        return saved;
+    }
+
+    public SavedTimer AddSavedTimer()
+    {
+        var saved = new SavedTimer { Name = "", Duration = TimeSpan.FromMinutes(25) };
+        State.SavedTimers.Add(saved);
+        StateEdited();
+        SavedTimersChanged?.Invoke();
+        return saved;
+    }
+
+    public void DeleteSavedTimer(SavedTimer saved)
+    {
+        State.SavedTimers.Remove(saved);
+        StateEdited();
+        SavedTimersChanged?.Invoke();
+    }
+
     /// <summary>
     /// Raised right after the user changes a timer (start, pause, reset…), so views redraw immediately
     /// instead of on the next 4 Hz tick.
