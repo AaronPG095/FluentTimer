@@ -56,32 +56,56 @@ public sealed class TimerEngine
         return timer;
     }
 
-    /// <summary>Start a countdown from a saved timer (its name, length and repeat setting).</summary>
-    public TimerItem StartSaved(SavedTimer saved) =>
-        StartCountdown(saved.Duration, saved.Name, repeat: saved.Repeat);
+    /// <summary>Start a saved timer: a countdown (name, length, repeat) or a Pomodoro (name, planned sessions).</summary>
+    public TimerItem StartSaved(SavedTimer saved) => saved.IsPomodoro
+        ? StartPomodoro(saved.Name, saved.Planned)
+        : StartCountdown(saved.Duration, saved.Name, repeat: saved.Repeat);
 
-    /// <summary>Save a running (or finished) countdown so it can be started again later. Returns the new entry.</summary>
+    /// <summary>Save a running (or finished) timer so it can be started again later. Returns the new entry.</summary>
     public SavedTimer? SaveAsTimer(Guid timerId)
     {
-        if (Find(timerId) is not { Kind: TimerKind.Countdown } t) return null;
+        if (Find(timerId) is not { Kind: TimerKind.Countdown or TimerKind.Pomodoro } t) return null;
         var saved = new SavedTimer
         {
             Name = t.Label,
-            Duration = t.InitialDuration > TimeSpan.Zero ? t.InitialDuration : t.Duration,
-            Repeat = t.Repeat,
+            Kind = t.Kind,
+            Duration = t.Kind == TimerKind.Pomodoro
+                ? Settings.Pomodoro.PhaseLength(PomodoroPhase.Work)
+                : t.InitialDuration > TimeSpan.Zero ? t.InitialDuration : t.Duration,
+            Repeat = t.Kind == TimerKind.Countdown && t.Repeat,
+            Planned = t.Kind == TimerKind.Pomodoro ? t.Planned : null,
         };
         State.SavedTimers.Add(saved);
         Changed?.Invoke();
         return saved;
     }
 
-    public TimerItem StartPomodoro(string label = "")
+    public const int MaxPlanned = 16;
+
+    /// <param name="planned">Number of focus sessions for this task; null keeps going until cancelled.</param>
+    public TimerItem StartPomodoro(string label = "", int? planned = null)
     {
-        var timer = new TimerItem { Kind = TimerKind.Pomodoro, Label = label.Trim(), Phase = PomodoroPhase.Work };
+        var timer = new TimerItem
+        {
+            Kind = TimerKind.Pomodoro,
+            Label = label.Trim(),
+            Phase = PomodoroPhase.Work,
+            Planned = planned is { } n ? Math.Clamp(n, 1, MaxPlanned) : null,
+        };
         Run(timer, Settings.Pomodoro.PhaseLength(PomodoroPhase.Work));
         State.Timers.Add(timer);
         Changed?.Invoke();
         return timer;
+    }
+
+    /// <summary>Set (or clear, with null) how many focus sessions a Pomodoro should run. Never below those already done.</summary>
+    public void SetPlanned(Guid id, int? planned)
+    {
+        if (Find(id) is not { Kind: TimerKind.Pomodoro } t) return;
+        int? clean = planned is { } n ? Math.Clamp(n, Math.Max(1, t.CompletedWorkSessions), MaxPlanned) : null;
+        if (t.Planned == clean) return;
+        t.Planned = clean;
+        Changed?.Invoke();
     }
 
     public void Pause(Guid id)
@@ -90,12 +114,20 @@ public sealed class TimerEngine
         t.PausedRemaining = t.Remaining(Now);
         t.EndsAtUtc = null;
         t.State = TimerState.Paused;
+        if (t.Kind == TimerKind.Pomodoro && t.Phase == PomodoroPhase.Work)
+        {
+            // In Pomodoro terms a pause is an interruption: count it, and remember when (for strict mode).
+            t.Interruptions++;
+            t.PausedAtUtc = Now;
+        }
         Changed?.Invoke();
     }
 
     public void Resume(Guid id)
     {
         if (Find(id) is not { State: TimerState.Paused } t) return;
+        if (VoidIfPausedTooLong(t)) { Changed?.Invoke(); return; }
+        t.PausedAtUtc = null;
         var remaining = t.PausedRemaining ?? t.Duration;
         // A Pomodoro waiting at the start of a phase begins its session now.
         if (remaining == t.Duration) t.StartedAtUtc = Now;
@@ -157,6 +189,22 @@ public sealed class TimerEngine
         if (Find(id) is not { Kind: TimerKind.Pomodoro } t) return;
         AdvancePomodoro(t, raiseAlert: false);
         Changed?.Invoke();
+    }
+
+    /// <summary>
+    /// Strict mode: a focus session paused longer than the limit no longer counts. It is voided and restarts
+    /// from the full length, running. Returns true if that happened.
+    /// </summary>
+    private bool VoidIfPausedTooLong(TimerItem t)
+    {
+        var p = Settings.Pomodoro;
+        if (!p.StrictMode || t.Kind != TimerKind.Pomodoro || t.Phase != PomodoroPhase.Work || t.PausedAtUtc is not { } pausedAt) return false;
+        if (Now - pausedAt <= TimeSpan.FromMinutes(Math.Max(1, p.StrictPauseLimitMinutes))) return false;
+        t.Voided++;
+        t.Interruptions = 0;
+        t.PausedAtUtc = null;
+        Run(t, p.PhaseLength(PomodoroPhase.Work));
+        return true;
     }
 
     // ---- Alert responses ----------------------------------------------------------------------
@@ -375,11 +423,28 @@ public sealed class TimerEngine
     {
         var p = Settings.Pomodoro;
         var finished = t.Phase;
+        TimerAlertsCleared?.Invoke(t.Id); // the previous phase's alert (e.g. a dimmed break) is over
+
         if (finished == PomodoroPhase.Work)
         {
             var ran = t.Duration - t.Remaining(Now);
             if (raiseAlert || ran >= TimeSpan.FromMinutes(1)) Log(t, ran, completed: raiseAlert);
             t.CompletedWorkSessions++;
+            t.Interruptions = 0;
+            t.PausedAtUtc = null;
+
+            // A planned task is done after its last focus session: no more breaks.
+            if (t.Planned is { } planned && t.CompletedWorkSessions >= planned)
+            {
+                State.Timers.Remove(t);
+                var done = (t.AlertOverride ?? Settings.DefaultAlert).Clone();
+                done.LoopSound = false;
+                AlertRaised?.Invoke(new AlertRequest(AlertKind.PomodoroPhase,
+                    string.IsNullOrWhiteSpace(t.Label) ? "Pomodoros done" : $"{t.Label} done",
+                    $"{t.CompletedWorkSessions}/{planned} pomodoros complete", done, t.Id));
+                return;
+            }
+
             t.Phase = p.LongBreakEvery > 0 && t.CompletedWorkSessions % p.LongBreakEvery == 0
                 ? PomodoroPhase.LongBreak
                 : PomodoroPhase.ShortBreak;
@@ -395,12 +460,24 @@ public sealed class TimerEngine
         else Wait(t, length);
 
         if (!raiseAlert) return;
-        var settings = (t.AlertOverride ?? Settings.DefaultAlert).Clone();
-        settings.LoopSound = false; // phase changes are informational; the timer keeps going
-        var (title, message) = finished == PomodoroPhase.Work
-            ? ("Focus session done", $"{TimerItem.PhaseName(t.Phase)}: {TimeFormat.Friendly(length)}")
-            : ("Break over", autoStart ? "Next focus session started" : "Ready to focus? Click to start");
-        AlertRaised?.Invoke(new AlertRequest(AlertKind.PomodoroPhase, title, message, settings, t.Id));
+        if (finished == PomodoroPhase.Work)
+        {
+            // Breaks use the Breaks alert style (its own calmer sound) and can dim the screen with a countdown.
+            var brk = Settings.BreakAlert.Clone();
+            brk.LoopSound = false;
+            brk.Escalate = false;
+            brk.DimOverlay = autoStart && (t.Phase == PomodoroPhase.LongBreak ? p.DimLongBreaks : p.DimShortBreaks);
+            AlertRaised?.Invoke(new AlertRequest(AlertKind.PomodoroBreak, "Focus done · take a break",
+                $"{TimerItem.PhaseName(t.Phase)} · {TimeFormat.Friendly(length)}", brk, t.Id));
+        }
+        else
+        {
+            // Back to work: the timer/alarm sound, so the two transitions sound different.
+            var back = (t.AlertOverride ?? Settings.DefaultAlert).Clone();
+            back.LoopSound = false;
+            AlertRaised?.Invoke(new AlertRequest(AlertKind.PomodoroPhase, "Break over",
+                autoStart ? "Next focus session started" : "Ready to focus? Click to start", back, t.Id));
+        }
     }
 
     private void Run(TimerItem t, TimeSpan length)
@@ -439,6 +516,7 @@ public sealed class TimerEngine
             EndedUtc = Now,
             Duration = duration,
             Completed = completed,
+            Interruptions = t.Kind == TimerKind.Pomodoro ? t.Interruptions : 0,
         });
 
     private TimerItem? Find(Guid id) => State.Timers.FirstOrDefault(t => t.Id == id);

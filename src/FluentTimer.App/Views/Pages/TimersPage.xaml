@@ -60,28 +60,53 @@
                                             HorizontalAlignment="Right" ToolTip="Delete saved timer" AutomationProperties.Name="Delete saved timer"
                                             Tag="{Binding}" Click="OnDeleteSaved" />
                                 </Grid>
-                                <StackPanel Orientation="Horizontal" Margin="0,8,0,0">
+                                <!-- Countdown: length + repeat -->
+                                <StackPanel x:Name="CountdownFields" Orientation="Horizontal" Margin="0,8,0,0">
                                     <TextBox Style="{StaticResource InlineEdit}" Text="{Binding DurationText, UpdateSourceTrigger=LostFocus}"
                                              Width="76" Margin="-7,0,6,0" FontSize="13" FontWeight="Normal" Tag="25m"
                                              FontFamily="{StaticResource MonoFont}" ToolTip="Length, e.g. 25m, 1h, 1h30, 90s"
                                              AutomationProperties.Name="Saved timer length" PreviewKeyDown="OnSavedFieldKeyDown" />
-                                    <ToggleButton Style="{StaticResource ChipToggle}" Padding="10,4" Margin="0,0,6,0" IsChecked="{Binding Repeat, Mode=TwoWay}"
+                                    <ToggleButton Style="{StaticResource ChipToggle}" Padding="10,4" IsChecked="{Binding Repeat, Mode=TwoWay}"
                                                   ToolTip="Repeat: dismissing the finished timer starts it again" AutomationProperties.Name="Repeat">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE8EE;" FontSize="11" Margin="0,0,5,0" />
                                             <TextBlock Text="Repeat" FontSize="12" />
                                         </StackPanel>
                                     </ToggleButton>
-                                    <Button Style="{StaticResource AccentButton}" Padding="12,4" Tag="{Binding}" Click="OnStartSaved"
+                                </StackPanel>
+                                <!-- Pomodoro: planned sessions + the current lengths -->
+                                <StackPanel x:Name="PomodoroFields" Orientation="Horizontal" Margin="0,8,0,0" Visibility="Collapsed">
+                                    <TextBlock Text="Sessions" Style="{StaticResource MutedText}" Margin="0,0,4,0" />
+                                    <TextBox Style="{StaticResource InlineEdit}" Text="{Binding PlannedText, UpdateSourceTrigger=LostFocus}"
+                                             Width="44" Margin="-2,0,8,0" FontSize="13" FontWeight="Normal" Tag="∞"
+                                             ToolTip="Planned focus sessions (1–16); empty or ∞ keeps going" AutomationProperties.Name="Planned sessions"
+                                             PreviewKeyDown="OnSavedFieldKeyDown" />
+                                    <TextBlock Text="{Binding PomodoroSummary}" Style="{StaticResource MutedText}" />
+                                </StackPanel>
+                                <Grid Margin="0,8,0,0">
+                                    <ToggleButton Style="{StaticResource ChipToggle}" Padding="10,4" HorizontalAlignment="Left" IsChecked="{Binding IsPomodoro, Mode=TwoWay}"
+                                                  ToolTip="Run this as a Pomodoro (focus and breaks) instead of a plain countdown" AutomationProperties.Name="Pomodoro">
+                                        <StackPanel Orientation="Horizontal">
+                                            <TextBlock Style="{StaticResource Glyph}" Text="&#xE916;" FontSize="11" Margin="0,0,5,0" />
+                                            <TextBlock Text="Pomodoro" FontSize="12" />
+                                        </StackPanel>
+                                    </ToggleButton>
+                                    <Button Style="{StaticResource AccentButton}" Padding="12,4" HorizontalAlignment="Right" Tag="{Binding}" Click="OnStartSaved"
                                             AutomationProperties.Name="Start saved timer">
                                         <StackPanel Orientation="Horizontal">
                                             <TextBlock Style="{StaticResource Glyph}" Text="&#xE768;" FontSize="11" Margin="0,0,6,0" Foreground="White" />
                                             <TextBlock Text="Start" FontSize="12" />
                                         </StackPanel>
                                     </Button>
-                                </StackPanel>
+                                </Grid>
                             </StackPanel>
                         </Border>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsPomodoro}" Value="True">
+                                <Setter TargetName="CountdownFields" Property="Visibility" Value="Collapsed" />
+                                <Setter TargetName="PomodoroFields" Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
                     </DataTemplate>
                 </ItemsControl.ItemTemplate>
             </ItemsControl>
@@ -108,10 +133,52 @@
                                              ToolTip="Click to name or rename this timer" AutomationProperties.Name="Timer name"
                                              PreviewKeyDown="OnNameKeyDown" />
 
+                                    <!-- Pomodoro: phase badge, position in the set, today's count vs goal, and the plan -->
+                                    <WrapPanel x:Name="PomoRow" Margin="0,6,0,2" Visibility="Collapsed">
+                                        <Border x:Name="PhaseBadge" CornerRadius="4" Padding="7,1" Margin="0,0,10,2" VerticalAlignment="Center"
+                                                Background="{DynamicResource OverlayAccentBrush}">
+                                            <TextBlock Text="{Binding PhaseText}" FontSize="11" FontWeight="SemiBold" Foreground="White" />
+                                        </Border>
+                                        <ItemsControl ItemsSource="{Binding SetDots}" VerticalAlignment="Center" Margin="0,0,10,2"
+                                                      ToolTip="Position in the set; a long break comes after the last dot">
+                                            <ItemsControl.ItemsPanel>
+                                                <ItemsPanelTemplate>
+                                                    <StackPanel Orientation="Horizontal" />
+                                                </ItemsPanelTemplate>
+                                            </ItemsControl.ItemsPanel>
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <Ellipse x:Name="D" Width="9" Height="9" Margin="0,0,4,0" Fill="{DynamicResource SetDotEmptyBrush}"
+                                                             StrokeThickness="0" />
+                                                    <DataTemplate.Triggers>
+                                                        <DataTrigger Binding="{Binding State}" Value="done">
+                                                            <Setter TargetName="D" Property="Fill" Value="{DynamicResource OverlayAccentBrush}" />
+                                                        </DataTrigger>
+                                                        <DataTrigger Binding="{Binding State}" Value="current">
+                                                            <Setter TargetName="D" Property="Fill" Value="Transparent" />
+                                                            <Setter TargetName="D" Property="Stroke" Value="{DynamicResource OverlayAccentBrush}" />
+                                                            <Setter TargetName="D" Property="StrokeThickness" Value="2" />
+                                                        </DataTrigger>
+                                                    </DataTemplate.Triggers>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+                                        <TextBlock Text="{Binding TodayText}" Style="{StaticResource MutedText}" Margin="0,0,10,2" />
+                                        <StackPanel Orientation="Horizontal" VerticalAlignment="Center" Margin="0,0,0,2"
+                                                    ToolTip="Planned focus sessions for this task. It finishes after the last one; ∞ keeps going.">
+                                            <TextBlock Text="Plan" Style="{StaticResource MutedText}" Margin="0,0,4,0" />
+                                            <Button Style="{StaticResource IconButton}" Width="22" Height="22" FontSize="10" Content="&#xE949;"
+                                                    AutomationProperties.Name="Fewer planned sessions" Tag="{Binding Id}" Click="OnPlanMinus" />
+                                            <TextBlock Text="{Binding PlanText}" Style="{StaticResource BodyText}" FontSize="12" MinWidth="34" TextAlignment="Center" />
+                                            <Button Style="{StaticResource IconButton}" Width="22" Height="22" FontSize="10" Content="&#xE948;"
+                                                    AutomationProperties.Name="More planned sessions" Tag="{Binding Id}" Click="OnPlanPlus" />
+                                        </StackPanel>
+                                    </WrapPanel>
+
                                     <TextBlock Text="{Binding Subtitle}" Style="{StaticResource MutedText}" Margin="0,2,0,0" />
                                     <TextBlock x:Name="Time" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}" FontSize="34" FontWeight="SemiBold"
                                                Foreground="{DynamicResource OverlayForegroundBrush}" Margin="0,6,0,6" />
-                                    <ProgressBar Value="{Binding Progress, Mode=OneWay}" Maximum="1" Height="4" MaxWidth="520" HorizontalAlignment="Stretch"
+                                    <ProgressBar x:Name="Bar" Value="{Binding Progress, Mode=OneWay}" Maximum="1" Height="4" MaxWidth="520" HorizontalAlignment="Stretch"
                                                  Foreground="{DynamicResource OverlayAccentBrush}" />
                                 </StackPanel>
                                 <StackPanel Grid.Column="1" Orientation="Horizontal" VerticalAlignment="Center" Margin="16,0,0,0">
@@ -149,6 +216,12 @@
                         <DataTemplate.Triggers>
                             <DataTrigger Binding="{Binding IsPomodoro}" Value="True">
                                 <Setter TargetName="Skip" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="PomoRow" Property="Visibility" Value="Visible" />
+                                <Setter TargetName="SaveBtn" Property="Visibility" Value="Visible" />
+                            </DataTrigger>
+                            <DataTrigger Binding="{Binding IsOnBreak}" Value="True">
+                                <Setter TargetName="Bar" Property="Foreground" Value="{DynamicResource BreakBrush}" />
+                                <Setter TargetName="PhaseBadge" Property="Background" Value="{DynamicResource BreakBrush}" />
                             </DataTrigger>
                             <DataTrigger Binding="{Binding IsCountdown}" Value="True">
                                 <Setter TargetName="RepeatToggle" Property="Visibility" Value="Visible" />

@@ -184,6 +184,44 @@ public sealed class SavedTimerVm : ObservableObject
         set { Model.Repeat = value; OnPropertyChanged(); _host.StateEdited(); }
     }
 
+    /// <summary>Two-way: switch this saved timer between a countdown and a Pomodoro.</summary>
+    public bool IsPomodoro
+    {
+        get => Model.IsPomodoro;
+        set
+        {
+            Model.Kind = value ? TimerKind.Pomodoro : TimerKind.Countdown;
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(PomodoroSummary));
+            _host.StateEdited();
+        }
+    }
+
+    /// <summary>Planned focus sessions as typed: a number, or empty / "∞" for open-ended.</summary>
+    public string PlannedText
+    {
+        get => Model.Planned?.ToString() ?? "∞";
+        set
+        {
+            var t = (value ?? "").Trim();
+            if (t is "" or "∞" or "0") Model.Planned = null;
+            else if (int.TryParse(t, out var n)) Model.Planned = Math.Clamp(n, 1, TimerEngine.MaxPlanned);
+            OnPropertyChanged();
+            OnPropertyChanged(nameof(PomodoroSummary));
+            _host.StateEdited();
+        }
+    }
+
+    /// <summary>"25 / 5 min · 4 sessions" from the current Pomodoro settings.</summary>
+    public string PomodoroSummary
+    {
+        get
+        {
+            var p = _host.Settings.Pomodoro;
+            return $"{p.WorkMinutes} / {p.ShortBreakMinutes} min" + (Model.Planned is { } n ? $" · {n} sessions" : " · open-ended");
+        }
+    }
+
     internal static string Short(TimeSpan t)
     {
         if (t < TimeSpan.FromMinutes(1)) return $"{t.TotalSeconds:0}s";

@@ -13,6 +13,17 @@ public sealed class PomodoroSettings
     public bool AutoStartBreaks { get; set; } = true;
     public bool AutoStartWork { get; set; }
 
+    /// <summary>Completed focus sessions to aim for each day.</summary>
+    public int DailyGoal { get; set; } = 8;
+
+    /// <summary>Strict mode: a focus session paused longer than <see cref="StrictPauseLimitMinutes"/> is voided and restarts.</summary>
+    public bool StrictMode { get; set; }
+    public int StrictPauseLimitMinutes { get; set; } = 2;
+
+    /// <summary>Dim the screen during breaks (with a live countdown and Skip break).</summary>
+    public bool DimShortBreaks { get; set; }
+    public bool DimLongBreaks { get; set; } = true;
+
     public TimeSpan PhaseLength(PomodoroPhase phase) => TimeSpan.FromMinutes(phase switch
     {
         PomodoroPhase.Work => WorkMinutes,

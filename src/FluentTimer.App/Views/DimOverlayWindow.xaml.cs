@@ -1,4 +1,5 @@
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media.Animation;
 using FluentTimer.App.Services;
@@ -28,6 +29,13 @@ public partial class DimOverlayWindow : Window
         SnoozeButton.Content = $"Snooze {_host.Settings.SnoozeMinutes} min";
         SnoozeButton.Visibility = alert.CanSnooze ? Visibility.Visible : Visibility.Collapsed;
         DismissButton.Content = IsBreak ? "Skip break" : alert.Request.Repeats ? "Start next round" : "Dismiss";
+        if (IsBreak)
+        {
+            // Breaks wear the break colour, like the widget and the timer card.
+            Card.SetResourceReference(Border.BorderBrushProperty, "BreakBrush");
+            CardIcon.SetResourceReference(TextBlock.ForegroundProperty, "BreakBrush");
+            Hint.Text = "Esc to skip the break";
+        }
 
         KeyDown += (_, e) => { if (e.Key == Key.Escape) OnDismiss(this, e); };
         Loaded += (_, _) =>
@@ -47,24 +55,36 @@ public partial class DimOverlayWindow : Window
 
     internal ActiveAlert Alert { get; }
 
-    private bool IsBreak => Alert.Request.TimerId is { } id && _host.Engine.Timers.Any(t => t.Id == id && t.Kind == TimerKind.Break);
+    /// <summary>The timer this overlay belongs to, if it is on a break (a reminder's break or a Pomodoro break).</summary>
+    private TimerItem? BreakTimer => Alert.Request.TimerId is { } id
+        ? _host.Engine.Timers.FirstOrDefault(t => t.Id == id && t.IsOnBreak)
+        : null;
+
+    private bool IsBreak => BreakTimer is not null;
 
     private void UpdateCountdown()
     {
         var timer = _host.Timers.FirstOrDefault(t => t.Id == Alert.Request.TimerId);
-        CountdownText.Visibility = timer is { IsBreak: true } ? Visibility.Visible : Visibility.Collapsed;
+        CountdownText.Visibility = timer is { Model.IsOnBreak: true } ? Visibility.Visible : Visibility.Collapsed;
         if (timer is not null) CountdownText.Text = timer.TimeText;
+    }
+
+    /// <summary>Skip the break: a Pomodoro moves on to its next focus session; a reminder's break simply ends.</summary>
+    private void SkipBreak(TimerItem t)
+    {
+        if (t.Kind == TimerKind.Pomodoro) _host.Act(en => en.SkipPhase(t.Id)); // also clears this alert
+        else _host.Act(en => en.Cancel(t.Id));
     }
 
     private void OnSnooze(object sender, RoutedEventArgs e)
     {
-        if (Alert.Request.TimerId is { } id && IsBreak) _host.Act(en => en.Cancel(id));
+        if (BreakTimer is { Kind: TimerKind.Break } brk) _host.Act(en => en.Cancel(brk.Id));
         _alerts.Snooze(Alert);
     }
 
     private void OnDismiss(object sender, RoutedEventArgs e)
     {
-        if (Alert.Request.TimerId is { } id && IsBreak) _host.Act(en => en.Cancel(id)); // clears this alert too
+        if (BreakTimer is { } brk) SkipBreak(brk);
         else _alerts.Dismiss(Alert);
     }
 

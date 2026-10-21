@@ -5,7 +5,8 @@ namespace FluentTimer.Core;
 
 public enum QuickEntryKind { Countdown, Alarm, Pomodoro }
 
-public sealed record QuickEntry(QuickEntryKind Kind, TimeSpan Duration, TimeOnly Time, string Label, bool Repeat = false);
+/// <param name="Planned">Pomodoro only: number of focus sessions ("pomo 4 thesis"), or null.</param>
+public sealed record QuickEntry(QuickEntryKind Kind, TimeSpan Duration, TimeOnly Time, string Label, bool Repeat = false, int? Planned = null);
 
 /// <summary>
 /// Parses quick-entry text such as "25m", "1h30 deep work", "Tea 4m", "90s", "5:00",
@@ -19,7 +20,7 @@ public static partial class QuickEntryParser
     [GeneratedRegex(@"(?<=^|\s)(?:repeat(?:ing)?|loop)(?=\s|$)", RegexOptions.IgnoreCase)]
     private static partial Regex RepeatRx();
 
-    [GeneratedRegex(@"^(?:pomo|pomodoro|focus)" + End, RegexOptions.IgnoreCase)]
+    [GeneratedRegex(@"^(?:pomo|pomodoro|focus)(?:\s+(?<n>\d{1,2})\s*(?:x|×|pomos?|pomodoros?)?)?" + End, RegexOptions.IgnoreCase)]
     private static partial Regex PomodoroRx();
 
     [GeneratedRegex(@"^(?:(?:at\s+|@)(?<h>\d{1,2})(?::(?<m>\d{2}))?\s*(?<ap>am|pm)?|(?<h>\d{1,2})(?::(?<m>\d{2}))?\s*(?<ap>am|pm))" + End, RegexOptions.IgnoreCase)]
@@ -61,7 +62,13 @@ public static partial class QuickEntryParser
                 continue;
             }
             var label = (text[..start] + " " + rest[length..]).Trim();
-            entry = new QuickEntry(kind, duration, time, label, repeat && kind == QuickEntryKind.Countdown);
+            int? planned = null;
+            if (kind == QuickEntryKind.Pomodoro && PomodoroRx().Match(rest) is { Success: true } pm && pm.Groups["n"].Success)
+            {
+                var n = int.Parse(pm.Groups["n"].Value, CultureInfo.InvariantCulture);
+                if (n is >= 1 and <= TimerEngine.MaxPlanned) planned = n;
+            }
+            entry = new QuickEntry(kind, duration, time, label, repeat && kind == QuickEntryKind.Countdown, planned);
             return true;
         }
         return false;

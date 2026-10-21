@@ -61,6 +61,24 @@ public partial class TimersPage : UserControl
         _host.StartSaved(vm.Model);
     }
 
+    private void OnPlanMinus(object sender, RoutedEventArgs e) => ChangePlan(Id(sender), -1);
+    private void OnPlanPlus(object sender, RoutedEventArgs e) => ChangePlan(Id(sender), +1);
+
+    /// <summary>∞ → (sessions done + 1) → … ; going below what's already done returns to ∞ (open-ended).</summary>
+    private void ChangePlan(Guid id, int delta)
+    {
+        if (_host.Engine.Timers.FirstOrDefault(t => t.Id == id) is not { } t) return;
+        var floor = Math.Max(1, t.CompletedWorkSessions + (t.Phase == PomodoroPhase.Work ? 1 : 0));
+        int? next = t.Planned switch
+        {
+            null when delta > 0 => floor,
+            null => null,
+            { } n when n + delta < floor => null,
+            { } n => n + delta,
+        };
+        _host.Act(en => en.SetPlanned(id, next));
+    }
+
     private void OnSaveRunning(object sender, RoutedEventArgs e)
     {
         if (_host.SaveTimer(Id(sender)) is { } saved)

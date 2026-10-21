@@ -51,7 +51,9 @@ internal sealed class TrayService : IDisposable
 
         var presets = new MenuItem { Header = "Start" };
         foreach (var saved in host.State.SavedTimers)
-            presets.Items.Add(Item(saved.DisplayName, () => host.StartSaved(saved), TimeFormat.Friendly(saved.Duration)));
+            presets.Items.Add(Item(saved.DisplayName, () => host.StartSaved(saved), saved.IsPomodoro
+                ? "Pomodoro" + (saved.Planned is { } n ? $" × {n}" : "")
+                : TimeFormat.Friendly(saved.Duration)));
         if (host.State.SavedTimers.Count > 0) presets.Items.Add(new Separator());
         foreach (var m in host.Settings.PresetMinutes)
             presets.Items.Add(Item($"{m} min", () => host.StartCountdown(TimeSpan.FromMinutes(m))));

@@ -3,7 +3,7 @@ using System.Text;
 
 namespace FluentTimer.Core;
 
-public sealed record LabelTotal(string Label, TimeSpan Total, int Sessions);
+public sealed record LabelTotal(string Label, TimeSpan Total, int Sessions, int Pomodoros = 0);
 
 /// <summary>One chart column: totals per series slot; the last slot is "Other".</summary>
 public sealed record DayTotals(DateOnly Day, TimeSpan[] BySeries)
@@ -33,7 +33,7 @@ public static class HistoryReport
         records
             .GroupBy(r => string.IsNullOrWhiteSpace(r.Label) ? NoLabel : r.Label.Trim(), StringComparer.OrdinalIgnoreCase)
             .Select(g => new LabelTotal(g.First().Label is { Length: > 0 } l ? l.Trim() : NoLabel,
-                new TimeSpan(g.Sum(r => r.Duration.Ticks)), g.Count()))
+                new TimeSpan(g.Sum(r => r.Duration.Ticks)), g.Count(), g.Count(r => r.IsCompletedPomodoro)))
             .OrderByDescending(t => t.Total)
             .ToList();
 
@@ -58,6 +58,10 @@ public static class HistoryReport
 
     public const string Other = "Other";
 
+    /// <summary>Completed Pomodoro focus sessions that ended on the given local day.</summary>
+    public static int PomodorosOn(IEnumerable<SessionRecord> records, IClock clock, DateOnly day) =>
+        records.Count(r => r.IsCompletedPomodoro && DateOnly.FromDateTime(clock.ToLocal(r.EndedUtc)) == day);
+
     /// <summary>
     /// Labels ranked by all-time total, so a label keeps its colour whichever period is shown
     /// (colour follows the entity, not its rank in the current view).
@@ -77,7 +81,7 @@ public static class HistoryReport
     public static string ToCsv(IEnumerable<SessionRecord> records, IClock clock)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("Date,Start,End,Label,Type,Minutes,Completed");
+        sb.AppendLine("Date,Start,End,Label,Type,Minutes,Completed,Interruptions");
         foreach (var r in records.OrderBy(r => r.StartedUtc))
         {
             var start = clock.ToLocal(r.StartedUtc);
@@ -88,7 +92,8 @@ public static class HistoryReport
               .Append(Escape(r.Label)).Append(',')
               .Append(r.Kind == TimerKind.Pomodoro ? "Focus" : "Timer").Append(',')
               .Append(Math.Round(r.Duration.TotalMinutes, 1).ToString(CultureInfo.InvariantCulture)).Append(',')
-              .Append(r.Completed ? "yes" : "no")
+              .Append(r.Completed ? "yes" : "no").Append(',')
+              .Append(r.Interruptions.ToString(CultureInfo.InvariantCulture))
               .AppendLine();
         }
         return sb.ToString();

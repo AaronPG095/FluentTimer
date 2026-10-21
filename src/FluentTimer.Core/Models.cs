@@ -28,6 +28,20 @@ public sealed class TimerItem
     public PomodoroPhase Phase { get; set; }
     public int CompletedWorkSessions { get; set; }
 
+    /// <summary>Pomodoro: how many focus sessions this task needs (null = keep going). It finishes after the last one.</summary>
+    public int? Planned { get; set; }
+
+    /// <summary>Pomodoro: times the current focus session was paused (an interruption, in Pomodoro terms).</summary>
+    public int Interruptions { get; set; }
+
+    /// <summary>Pomodoro: when the current focus session was paused (strict mode voids long pauses).</summary>
+    public DateTime? PausedAtUtc { get; set; }
+
+    /// <summary>Pomodoro: focus sessions voided by strict mode (restarted after a long pause).</summary>
+    public int Voided { get; set; }
+
+    public bool IsOnBreak => Kind == TimerKind.Break || Kind == TimerKind.Pomodoro && Phase != PomodoroPhase.Work;
+
     /// <summary>Countdowns only: dismissing the finished timer starts it again from its original length.</summary>
     public bool Repeat { get; set; }
 
@@ -70,7 +84,16 @@ public sealed class SavedTimer
     public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(25);
     public bool Repeat { get; set; }
 
-    public string DisplayName => string.IsNullOrWhiteSpace(Name) ? TimeFormat.Friendly(Duration) : Name;
+    /// <summary>Countdown (uses Duration/Repeat) or Pomodoro (uses the Pomodoro settings and Planned).</summary>
+    public TimerKind Kind { get; set; } = TimerKind.Countdown;
+
+    /// <summary>Pomodoro only: number of focus sessions (null = open-ended).</summary>
+    public int? Planned { get; set; }
+
+    public bool IsPomodoro => Kind == TimerKind.Pomodoro;
+
+    public string DisplayName => !string.IsNullOrWhiteSpace(Name) ? Name
+        : IsPomodoro ? "Pomodoro" : TimeFormat.Friendly(Duration);
 }
 
 public sealed class IntervalReminder
@@ -149,9 +172,16 @@ public sealed class SessionRecord
     public DateTime EndedUtc { get; set; }
     public TimeSpan Duration { get; set; }
     public bool Completed { get; set; }
+
+    /// <summary>Pomodoro focus sessions: how many times it was paused.</summary>
+    public int Interruptions { get; set; }
+
+    /// <summary>A finished Pomodoro focus session (the unit the Pomodoro technique counts).</summary>
+    public bool IsCompletedPomodoro => Kind == TimerKind.Pomodoro && Completed;
 }
 
-public enum AlertKind { TimerDone, PomodoroPhase, Reminder, Alarm, BreakOver }
+/// <summary>PomodoroBreak: a Pomodoro break has started (may dim the screen; cleared when the break ends).</summary>
+public enum AlertKind { TimerDone, PomodoroPhase, Reminder, Alarm, BreakOver, PomodoroBreak }
 
 public sealed record AlertRequest(
     AlertKind Kind,

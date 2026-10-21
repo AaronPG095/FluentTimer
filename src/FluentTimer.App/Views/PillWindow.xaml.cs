@@ -6,6 +6,7 @@ using System.Windows.Input;
 using System.Windows.Interop;
 using System.Windows.Media;
 using System.Windows.Media.Animation;
+using System.Windows.Shapes;
 using System.Windows.Threading;
 using FluentTimer.App.Services;
 using FluentTimer.Core;
@@ -154,10 +155,18 @@ public partial class PillWindow : Window
         PausedGlyph.Visibility = running ? Visibility.Collapsed : Visibility.Visible;
         Dot.Visibility = running ? Visibility.Visible : Visibility.Collapsed;
         PillTime.Opacity = running ? 1 : 0.6;
+        // Breaks (Pomodoro or reminder) breathe in the break colour, focus/countdowns in the accent.
+        var onBreak = first.Model.IsOnBreak;
+        if (onBreak != _dotShowsBreak)
+        {
+            _dotShowsBreak = onBreak;
+            Dot.SetResourceReference(Shape.FillProperty, onBreak ? "BreakBrush" : "OverlayAccentBrush");
+        }
         SetBreathing(running);
     }
 
     private bool _breathing;
+    private bool _dotShowsBreak;
 
     /// <summary>
     /// Gentle breathing dot while a timer runs. Driven by WPF's animation clock (display frame rate, render thread)

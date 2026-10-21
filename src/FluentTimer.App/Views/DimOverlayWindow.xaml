@@ -20,7 +20,7 @@
             <DropShadowEffect BlurRadius="40" ShadowDepth="4" Opacity="0.5" />
         </Border.Effect>
         <StackPanel>
-            <TextBlock Style="{StaticResource Glyph}" Text="&#xE916;" FontSize="28" Foreground="{DynamicResource OverlayAccentBrush}" Margin="0,0,0,12" />
+            <TextBlock x:Name="CardIcon" Style="{StaticResource Glyph}" Text="&#xE916;" FontSize="28" Foreground="{DynamicResource OverlayAccentBrush}" Margin="0,0,0,12" />
             <TextBlock x:Name="TitleText" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" TextAlignment="Center"
                        TextWrapping="Wrap" Foreground="{DynamicResource OverlayForegroundBrush}" />
             <TextBlock x:Name="MessageText" Style="{StaticResource MutedText}" FontSize="14" TextAlignment="Center" HorizontalAlignment="Center" Margin="0,6,0,0" />
@@ -30,7 +30,7 @@
                 <Button x:Name="SnoozeButton" Style="{StaticResource ChipButton}" Margin="0,0,8,0" Click="OnSnooze" />
                 <Button x:Name="DismissButton" Style="{StaticResource AccentButton}" Padding="20,6" Click="OnDismiss" />
             </StackPanel>
-            <TextBlock Text="Esc to dismiss" Style="{StaticResource MutedText}" FontSize="11" HorizontalAlignment="Center" Margin="0,14,0,0" />
+            <TextBlock x:Name="Hint" Text="Esc to dismiss" Style="{StaticResource MutedText}" FontSize="11" HorizontalAlignment="Center" Margin="0,14,0,0" />
         </StackPanel>
     </Border>
 </Window>

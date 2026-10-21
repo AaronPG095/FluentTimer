@@ -6,7 +6,8 @@ A Windows timer that lives in your tray and starts with Windows. A small floatin
 
 - **Countdowns** with names. Several can run at once. Name a timer when you start it (`Tea 4m`), or rename it any time: click its title in the main window, or double-click it in the widget's list (or right-click → Rename timer…). History logs the name a timer has when it finishes. Turn on **Repeat** (or type `1h repeat`) and clicking the finished timer starts the same length again.
 - **Saved timers**: named countdowns (name, length, repeat) you start with one click from the main window, quick entry or the widget/tray **Start** menu. Save a running timer with its save button, or add one from scratch.
-- **Pomodoro**: 25/5/15 with a long break every 4 sessions, all configurable. Breaks start automatically; you start each focus session yourself.
+- **Pomodoro** (the real technique): focus and breaks have their own colours (accent and green); dots show your place in the set; "3 / 8 today" tracks a daily goal; plan a task as N pomodoros (`pomo 4 thesis`, or Plan − / + on the card) and it finishes after the last; pauses count as interruptions, and optional strict mode voids a focus session paused too long; breaks use the Breaks alert style and can dim the screen with a countdown and Skip break. Pomodoros can be saved like any timer.
+- **Pomodoro basics**: 25/5/15 with a long break every 4 sessions, all configurable. Breaks start automatically; you start each focus session yourself.
 - **Interval reminders** (stand up, eye breaks) with active hours and weekdays. They pause while the screen is locked or you're idle, and an optional break countdown dims the screen.
 - **Alarms**: one-off or repeating on chosen weekdays.
 - **Quick entry** from anywhere with **Ctrl+Alt+T**: `25m`, `Tea 4m`, `1h30 deep work`, `90s`, `5:00`, `at 14:30 lunch`, `2pm call`, `pomo writing`.

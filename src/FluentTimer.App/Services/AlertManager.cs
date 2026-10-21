@@ -27,7 +27,9 @@ public sealed class ActiveAlert : ObservableObject
     public bool Escalated { get => _escalated; set => SetProperty(ref _escalated, value); }
 
     /// <summary>Informational alerts (phase change, break over) clear themselves.</summary>
-    public bool AutoDismisses => Request.Kind is AlertKind.PomodoroPhase or AlertKind.BreakOver || IsTest;
+    public bool AutoDismisses => Request.Kind is AlertKind.PomodoroPhase or AlertKind.BreakOver || IsTest
+        // A Pomodoro break without the screen dim is just a heads-up; a dimmed one stays until the break ends.
+        || Request.Kind == AlertKind.PomodoroBreak && !Request.Settings.DimOverlay;
 }
 
 /// <summary>Turns engine alert requests into sound, the pill's visual alert state and the dim overlay.</summary>

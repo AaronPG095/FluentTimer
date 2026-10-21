@@ -40,6 +40,7 @@ internal sealed class AppHost : IDisposable
         _tick = new DispatcherTimer(TimeSpan.FromMilliseconds(250), DispatcherPriority.Normal, (_, _) => OnTick(), Dispatcher.CurrentDispatcher);
 
         SystemEvents.SessionSwitch += OnSessionSwitch;
+        HistoryChanged += () => _pomodorosToday = -1; // recount today's pomodoros on next read
         SystemEvents.SessionEnding += (_, _) => SaveAll();
     }
 
@@ -125,10 +126,30 @@ internal sealed class AppHost : IDisposable
         AfterUserAction();
     }
 
-    public void StartPomodoro(string label = "")
+    public void StartPomodoro(string label = "", int? planned = null)
     {
-        Engine.StartPomodoro(label);
+        Engine.StartPomodoro(label, planned);
         AfterUserAction();
+    }
+
+    // ---- Pomodoro counts ----------------------------------------------------------------------
+
+    private int _pomodorosToday = -1;
+    private DateOnly _pomodoroDay;
+
+    /// <summary>Completed Pomodoro focus sessions today (cached; refreshed when history changes or the day rolls over).</summary>
+    public int PomodorosToday
+    {
+        get
+        {
+            var today = DateOnly.FromDateTime(Clock.LocalNow());
+            if (_pomodorosToday < 0 || today != _pomodoroDay)
+            {
+                _pomodoroDay = today;
+                _pomodorosToday = HistoryReport.PomodorosOn(History, Clock, today);
+            }
+            return _pomodorosToday;
+        }
     }
 
     // ---- Saved timers -------------------------------------------------------------------------
@@ -184,8 +205,8 @@ internal sealed class AppHost : IDisposable
         switch (entry.Kind)
         {
             case QuickEntryKind.Pomodoro:
-                StartPomodoro(entry.Label);
-                return "Pomodoro started";
+                StartPomodoro(entry.Label, entry.Planned);
+                return entry.Planned is { } n ? $"Pomodoro started · {n} sessions planned" : "Pomodoro started";
             case QuickEntryKind.Alarm:
                 var date = TimerEngine.NextOccurrenceDate(entry.Time, Clock.LocalNow());
                 State.Alarms.Add(new Alarm
@@ -204,7 +225,7 @@ internal sealed class AppHost : IDisposable
 
     public static string Describe(QuickEntry e) => e.Kind switch
     {
-        QuickEntryKind.Pomodoro => $"Pomodoro{Suffix(e.Label)}",
+        QuickEntryKind.Pomodoro => $"Pomodoro{(e.Planned is { } n ? $" × {n}" : "")}{Suffix(e.Label)}",
         QuickEntryKind.Alarm => $"Alarm at {e.Time:HH:mm}{Suffix(e.Label)}",
         _ => $"Timer {TimeFormat.Friendly(e.Duration)}{Suffix(e.Label)}{(e.Repeat ? " · repeats when dismissed" : "")}",
     };

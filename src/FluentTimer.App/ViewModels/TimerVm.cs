@@ -92,13 +92,67 @@ public sealed class TimerVm : ObservableObject
         Label = Model.DisplayLabel;
         TimeText = TimeFormat.Countdown(Model.Remaining(utcNow));
         Progress = Model.Progress(utcNow);
+        if (IsBreak) IsOnBreak = true;
         Subtitle = Model.Kind switch
         {
-            TimerKind.Pomodoro => $"{TimerItem.PhaseName(Model.Phase)} · session {Model.CompletedWorkSessions + (Model.Phase == PomodoroPhase.Work ? 1 : 0)} · {TimeFormat.Friendly(Model.Duration)}",
+            TimerKind.Pomodoro => "", // set in UpdatePomodoro
             TimerKind.Break => $"Break · {TimeFormat.Friendly(Model.Duration)}",
             _ => IsRinging ? "Time's up" : TimeFormat.Friendly(Model.Duration),
         };
         if (Model.Repeat) Subtitle += " · repeats";
         if (IsPaused) Subtitle += " · paused";
+        if (IsPomodoro) UpdatePomodoro();
+    }
+
+    // ---- Pomodoro ---------------------------------------------------------------------------
+
+    private bool _isOnBreak;
+    private string _phaseText = "";
+    private string _todayText = "";
+    private string _planText = "";
+    private string _setKey = "";
+
+    /// <summary>Pomodoro (or reminder) break: drawn in the break colour instead of the accent.</summary>
+    public bool IsOnBreak { get => _isOnBreak; private set => SetProperty(ref _isOnBreak, value); }
+    public string PhaseText { get => _phaseText; private set => SetProperty(ref _phaseText, value); }
+
+    /// <summary>"3 / 8 today": completed pomodoros against the daily goal.</summary>
+    public string TodayText { get => _todayText; private set => SetProperty(ref _todayText, value); }
+
+    /// <summary>"2 of 4" for a planned task, "∞" when open-ended.</summary>
+    public string PlanText { get => _planText; private set => SetProperty(ref _planText, value); }
+
+    /// <summary>Position in the current set (e.g. ● ● ◐ ○ for the 3rd of 4), as dots.</summary>
+    public System.Collections.ObjectModel.ObservableCollection<SetDot> SetDots { get; } = [];
+
+    private void UpdatePomodoro()
+    {
+        var host = Services.AppHost.Current;
+        var p = host.Settings.Pomodoro;
+        IsOnBreak = Model.IsOnBreak;
+        PhaseText = TimerItem.PhaseName(Model.Phase);
+        TodayText = $"{host.PomodorosToday} / {Math.Max(1, p.DailyGoal)} today";
+        PlanText = Model.Planned is { } n ? $"{Math.Min(Model.CompletedWorkSessions + (Model.Phase == PomodoroPhase.Work ? 1 : 0), n)} of {n}" : "∞";
+
+        var parts = new List<string> { $"Session {Model.CompletedWorkSessions + (Model.Phase == PomodoroPhase.Work ? 1 : 0)}" + (Model.Planned is { } pl ? $" of {pl}" : "") };
+        parts.Add(TimeFormat.Friendly(Model.Duration));
+        if (Model.Interruptions > 0) parts.Add(Model.Interruptions == 1 ? "1 interruption" : $"{Model.Interruptions} interruptions");
+        if (Model.Voided > 0) parts.Add(Model.Voided == 1 ? "1 restarted (strict)" : $"{Model.Voided} restarted (strict)");
+        if (IsPaused) parts.Add(Model.PausedRemaining == Model.Duration ? "ready" : "paused");
+        Subtitle = string.Join(" · ", parts);
+
+        // Dots for the set (sessions until the long break): done, current (focus in progress) or still to come.
+        var every = Math.Clamp(p.LongBreakEvery, 1, 8);
+        var doneInSet = Model.CompletedWorkSessions % every;
+        if (doneInSet == 0 && Model.CompletedWorkSessions > 0 && Model.Phase == PomodoroPhase.LongBreak) doneInSet = every;
+        var key = $"{every}/{doneInSet}/{Model.Phase}";
+        if (key == _setKey) return;
+        _setKey = key;
+        SetDots.Clear();
+        for (var i = 0; i < every; i++)
+            SetDots.Add(new SetDot(i < doneInSet ? "done" : i == doneInSet && Model.Phase == PomodoroPhase.Work ? "current" : "todo"));
     }
 }
+
+/// <summary>One dot in a Pomodoro set: "done", "current" or "todo".</summary>
+public sealed record SetDot(string State);

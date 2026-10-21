@@ -15,7 +15,9 @@ internal sealed class SessionRow(SessionRecord record, AppHost host, IClock cloc
     public SessionRecord Record { get; } = record;
     public string Date => clock.ToLocal(Record.StartedUtc).ToString("ddd d MMM");
     public string Span => $"{clock.ToLocal(Record.StartedUtc):HH:mm}–{clock.ToLocal(Record.EndedUtc):HH:mm}";
-    public string Kind => Record.Kind == TimerKind.Pomodoro ? "Focus" : "Timer";
+    public string Kind => Record.Kind != TimerKind.Pomodoro ? "Timer"
+        : Record.Interruptions == 0 ? "Pomodoro"
+        : $"Pomodoro · {Record.Interruptions}×";
     public string Duration => TimeFormat.Total(Record.Duration);
     public string Check => Record.Completed ? "" : "";
 
@@ -96,13 +98,17 @@ public partial class HistoryPage : UserControl
             t.Label,
             Fraction = max > 0 ? t.Total.TotalSeconds / max : 0,
             TotalText = TimeFormat.Total(t.Total),
-            SessionsText = t.Sessions == 1 ? "1 session" : $"{t.Sessions} sessions",
+            SessionsText = t.Pomodoros > 0
+                ? (t.Pomodoros == 1 ? "1 pomodoro" : $"{t.Pomodoros} pomodoros")
+                : t.Sessions == 1 ? "1 session" : $"{t.Sessions} sessions",
         }).ToList();
         NoTotals.Visibility = totals.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
 
         TotalText.Text = TimeFormat.Total(new TimeSpan(_visible.Sum(r => r.Duration.Ticks)));
         CountText.Text = _visible.Count.ToString();
         CompletedText.Text = _visible.Count(r => r.Completed).ToString();
+        PomodoroText.Text = _visible.Count(r => r.IsCompletedPomodoro).ToString();
+        InterruptionText.Text = _visible.Sum(r => r.Interruptions).ToString();
         SessionsCard.Visibility = _visible.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
         SessionList.ItemsSource = _visible.Take(300).Select(r => new SessionRow(r, _host, _host.Clock)).ToList();
 

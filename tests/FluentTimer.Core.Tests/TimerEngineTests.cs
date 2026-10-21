@@ -193,7 +193,6 @@ public class TimerEngineTests
         Assert.NotNull(saved);
         Assert.Same(saved, Assert.Single(f.State.SavedTimers));
         Assert.Equal(("Stretch", 45 * Min, true), (saved.Name, saved.Duration, saved.Repeat));
-        Assert.Null(f.Engine.SaveAsTimer(f.Engine.StartPomodoro().Id)); // only countdowns
     }
 
     [Fact]

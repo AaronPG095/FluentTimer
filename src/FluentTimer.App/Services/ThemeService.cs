@@ -34,6 +34,9 @@ internal static class ThemeService
         ["PillBackgroundBrush"] = ("#F0202020", "#F5FBFBFB"),
         ["PillBorderBrush"] = ("#55434343", "#40000000"),
         ["ScrimBrush"] = ("#B3000000", "#99000000"),
+        // Pomodoro breaks: the validated "aqua/green" categorical slot (dark / light), distinct from the accent.
+        ["BreakBrush"] = ("#199E70", "#1BAF7A"),
+        ["SetDotEmptyBrush"] = ("#4A4A4A", "#D0D0D0"),
     };
 
     public static bool IsDark { get; private set; } = true;

@@ -172,6 +172,11 @@ public sealed class SettingsVm : ObservableObject
     public double? LongBreakEvery { get => S.Pomodoro.LongBreakEvery; set { if (value is >= 1) { S.Pomodoro.LongBreakEvery = (int)value; Save(); } } }
     public bool AutoStartBreaks { get => S.Pomodoro.AutoStartBreaks; set { S.Pomodoro.AutoStartBreaks = value; Save(); } }
     public bool AutoStartWork { get => S.Pomodoro.AutoStartWork; set { S.Pomodoro.AutoStartWork = value; Save(); } }
+    public double? DailyGoal { get => S.Pomodoro.DailyGoal; set { if (value is >= 1) { S.Pomodoro.DailyGoal = (int)value; Save(); } } }
+    public bool StrictMode { get => S.Pomodoro.StrictMode; set { S.Pomodoro.StrictMode = value; Save(); } }
+    public double? StrictPauseLimit { get => S.Pomodoro.StrictPauseLimitMinutes; set { if (value is >= 1) { S.Pomodoro.StrictPauseLimitMinutes = (int)value; Save(); } } }
+    public bool DimShortBreaks { get => S.Pomodoro.DimShortBreaks; set { S.Pomodoro.DimShortBreaks = value; Save(); } }
+    public bool DimLongBreaks { get => S.Pomodoro.DimLongBreaks; set { S.Pomodoro.DimLongBreaks = value; Save(); } }
 
     // Appearance
     public static IReadOnlyList<string> ThemeChoices { get; } = ["System", "Dark", "Light"];

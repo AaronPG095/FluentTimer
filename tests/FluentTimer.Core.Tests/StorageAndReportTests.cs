@@ -76,7 +76,7 @@ public class StorageAndReportTests
         ], clock);
 
         var lines = csv.TrimEnd().Split(Environment.NewLine);
-        Assert.Equal("Date,Start,End,Label,Type,Minutes,Completed", lines[0]);
+        Assert.Equal("Date,Start,End,Label,Type,Minutes,Completed,Interruptions", lines[0]);
         Assert.Contains("\"Smith, \"\"Big\"\" deal\"", csv);
         Assert.Contains(",'=HYPERLINK(),", csv);
         Assert.Contains("2026-10-14,09:00,09:25", csv);

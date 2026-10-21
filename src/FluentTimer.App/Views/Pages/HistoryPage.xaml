@@ -36,9 +36,17 @@
                         <TextBlock Text="Sessions" Style="{StaticResource MutedText}" />
                         <TextBlock x:Name="CountText" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource OverlayForegroundBrush}" />
                     </StackPanel>
-                    <StackPanel>
+                    <StackPanel Margin="0,0,40,0">
                         <TextBlock Text="Completed" Style="{StaticResource MutedText}" />
                         <TextBlock x:Name="CompletedText" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource OverlayForegroundBrush}" />
+                    </StackPanel>
+                    <StackPanel Margin="0,0,40,0">
+                        <TextBlock Text="Pomodoros" Style="{StaticResource MutedText}" />
+                        <TextBlock x:Name="PomodoroText" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource OverlayForegroundBrush}" />
+                    </StackPanel>
+                    <StackPanel>
+                        <TextBlock Text="Interruptions" Style="{StaticResource MutedText}" />
+                        <TextBlock x:Name="InterruptionText" FontFamily="{StaticResource DisplayFont}" FontSize="26" FontWeight="SemiBold" Foreground="{DynamicResource OverlayForegroundBrush}" />
                     </StackPanel>
                 </StackPanel>
             </Border>
@@ -132,7 +140,7 @@
                                     <ColumnDefinition Width="104" />
                                     <ColumnDefinition Width="104" />
                                     <ColumnDefinition Width="*" />
-                                    <ColumnDefinition Width="60" />
+                                    <ColumnDefinition Width="96" />
                                     <ColumnDefinition Width="70" />
                                     <ColumnDefinition Width="24" />
                                     <ColumnDefinition Width="32" />
