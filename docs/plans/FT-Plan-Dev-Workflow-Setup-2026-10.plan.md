@@ -1,10 +1,11 @@
 ---
 title: Plan - Process: Set up the shared AI development process
 ticket: https://app.notion.com/p/FT-Plan-Process-Set-up-the-shared-AI-development-process-4090b9c6786f81ef916feacbf110e4e8
-status: in-progress
+status: shipped
 agent: Codex
 branch: chore/dev-workflow
 worktree: dev-workflow
+pr: https://github.com/AaronPG095/FluentTimer/pull/1
 ---
 # FluentTimer: shared AI development process
 
@@ -34,7 +35,7 @@ Install FluentOverlay's shared development process in FluentTimer. Use one repo-
 - [x] Ensure the no-plan label exists with the documented scope. verified: GitHub label lookup confirmed no-plan exists; no label was added to this non-trivial PR.
 - [x] Create the Codex ticket, commit the plan and start the work. verified: create/start succeeded with --agent Codex; the initial plan commit exists and the plan records its ticket, branch and worktree.
 - [x] Verify the template rejection, closed-out plan and CI gate. verified: node --check succeeded; unfinished template failed with open items; plan check and ci-check passed.
-- [ ] Publish one setup PR, link it with ship and leave merging to Aaron. deferred: publishing and ship run after the closed-out check gate.
+- [x] Publish one setup PR, link it with ship and leave merging to Aaron. verified: PR opened against main; ticket ship succeeded and recorded the PR URL; merge remains Aaron's decision.
 
 ## Steps
 
@@ -49,7 +50,7 @@ Install FluentOverlay's shared development process in FluentTimer. Use one repo-
 - [x] Ensure the no-plan label exists with the documented scope.
 - [x] Create the Codex ticket, commit the plan and start the work.
 - [x] Verify the template rejection, closed-out plan and CI gate. verified: node --check succeeded; unfinished template failed with open items; plan check and ci-check passed.
-- [ ] Publish one setup PR, link it with ship and leave merging to Aaron. deferred: publishing and ship run after the closed-out check gate.
+- [x] Publish one setup PR, link it with ship and leave merging to Aaron. verified: PR opened against main; ticket ship succeeded and recorded the PR URL; merge remains Aaron's decision.
 
 ## Risks
 
@@ -73,3 +74,4 @@ Product behavior changes, deployment, Notion schema changes, modification of exi
 ## Progress log
 
 <!-- One line per session, added with: node scripts/ticket.mjs log <plan> --agent <client> --message "<done>; next: <step>; open: <questions>" -->
+- 2026-10-30 07:24 UTC, Codex: Installed and verified shared process; PR published and linked via ship; next: Aaron reviews and merges; open: none in setup plan; merge-triggered Task completion remains untested until merge
