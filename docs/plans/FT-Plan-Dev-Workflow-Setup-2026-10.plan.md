@@ -33,7 +33,7 @@ Install FluentOverlay's shared development process in FluentTimer. Use one repo-
 - [x] Align existing ticket guidance with the CLI and preserve historical records. verified: tracked instruction paths were inspected; no conflicting ticket lifecycle rules exist.
 - [x] Ensure the no-plan label exists with the documented scope. verified: GitHub label lookup confirmed no-plan exists; no label was added to this non-trivial PR.
 - [x] Create the Codex ticket, commit the plan and start the work. verified: create/start succeeded with --agent Codex; the initial plan commit exists and the plan records its ticket, branch and worktree.
-- [ ] Verify the template rejection, closed-out plan and CI gate. deferred: final plan and CI verification run immediately after this evidence commit.
+- [x] Verify the template rejection, closed-out plan and CI gate. verified: node --check succeeded; unfinished template failed with open items; plan check and ci-check passed.
 - [ ] Publish one setup PR, link it with ship and leave merging to Aaron. deferred: publishing and ship run after the closed-out check gate.
 
 ## Steps
@@ -48,7 +48,7 @@ Install FluentOverlay's shared development process in FluentTimer. Use one repo-
 - [x] Align existing ticket guidance with the CLI and preserve historical records.
 - [x] Ensure the no-plan label exists with the documented scope.
 - [x] Create the Codex ticket, commit the plan and start the work.
-- [ ] Verify the template rejection, closed-out plan and CI gate. deferred: final plan and CI verification run immediately after this evidence commit.
+- [x] Verify the template rejection, closed-out plan and CI gate. verified: node --check succeeded; unfinished template failed with open items; plan check and ci-check passed.
 - [ ] Publish one setup PR, link it with ship and leave merging to Aaron. deferred: publishing and ship run after the closed-out check gate.
 
 ## Risks
