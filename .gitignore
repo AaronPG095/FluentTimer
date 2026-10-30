@@ -483,4 +483,4 @@ $RECYCLE.BIN/
 
 # Fluent Timer
 publish/
-
+.worktrees/
