@@ -145,6 +145,13 @@
                         </StackPanel>
                         <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding VerticalOnSides, Mode=TwoWay}" />
                     </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
+                            <TextBlock Text="Keep timer list pinned open" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Keeps the expanded list of active timers continuously visible instead of only on hover" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding PinTimerList, Mode=TwoWay}" />
+                    </Grid>
                 </StackPanel>
             </Border>
 

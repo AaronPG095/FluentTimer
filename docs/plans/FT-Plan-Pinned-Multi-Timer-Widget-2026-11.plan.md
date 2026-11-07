@@ -1,7 +1,7 @@
 ---
 title: Plan - Feature: Pinned Multi-Timer Widget List
 ticket: https://app.notion.com/p/FT-Plan-Feature-Pinned-Multi-Timer-Widget-List-4110b9c6786f81f99b22fb5b1053016d
-status: planned
+status: in-progress
 priority: medium
 state: quick
 due: 
@@ -9,6 +9,8 @@ reviewedBy:
 reviewVerdict: 
 devTicketKey: FT:FT-Plan-Pinned-Multi-Timer-Widget-2026-11
 agent: Gemini
+branch: feat/pinned-multi-timer-widget
+worktree: FluentTimer
 ---
 # Pinned Multi-Timer Widget List
 
@@ -31,21 +33,21 @@ Adds a pinning capability to the floating widget (`PillWindow`) so that multiple
 
 ## Acceptance criteria
 
-- [ ] `PillSettings` has `PinTimerList` (boolean, default `false`), persisting to `settings.json`.
-- [ ] Settings -> Widget provides a toggle switch ("Keep timer list pinned open") bound two-way to `PinTimerList`.
-- [ ] Widget flyout (`ListPanel`) includes a pin toggle button (`PinToggle`, style `IconToggle`, glyph `&#xE718;`) allowing one-click pinning/unpinning directly from the widget.
-- [ ] When `PinTimerList` is `true` and active/staged timers exist (`_host.Timers.Count > 0`), `ListPanel` remains visible on screen rather than collapsing when the mouse leaves.
-- [ ] When all timers complete or are dismissed, the widget returns cleanly to its idle state (collapsed idle bar or hidden per idle setting).
-- [ ] When `FadeWhenAway` is enabled, the pinned widget smoothly dims to away opacity and enables click-through (`WS_EX_TRANSPARENT`) while the mouse is away, restoring full opacity when hovered.
-- [ ] Unit tests in `SettingsTests.cs` verify `PinTimerList` default state and JSON serialization round-tripping.
+- [x] `PillSettings` has `PinTimerList` (boolean, default `false`), persisting to `settings.json`. verified: unit tests in SettingsTests.cs confirm default false and JSON round-trip
+- [x] Settings -> Widget provides a toggle switch ("Keep timer list pinned open") bound two-way to `PinTimerList`. verified: verified XAML binding and ViewModel property in SettingsVm.cs
+- [x] Widget flyout (`ListPanel`) includes a pin toggle button (`PinToggle`, style `IconToggle`, glyph `&#xE718;`) allowing one-click pinning/unpinning directly from the widget. verified: verified button markup in PillWindow.xaml and click/visual sync in PillWindow.xaml.cs
+- [x] When `PinTimerList` is `true` and active/staged timers exist (`_host.Timers.Count > 0`), `ListPanel` remains visible on screen rather than collapsing when the mouse leaves. verified: verified ListPanel visibility condition evaluates true when pinned and active timers exist
+- [x] When all timers complete or are dismissed, the widget returns cleanly to its idle state (collapsed idle bar or hidden per idle setting). verified: verified idle branch collapses ListPanel regardless of pin state
+- [x] When `FadeWhenAway` is enabled, the pinned widget smoothly dims to away opacity and enables click-through (`WS_EX_TRANSPARENT`) while the mouse is away, restoring full opacity when hovered. verified: verified CursorState inflates list rect and UpdatePresence applies WS_EX_TRANSPARENT and AwayOpacity when away
+- [x] Unit tests in `SettingsTests.cs` verify `PinTimerList` default state and JSON serialization round-tripping. verified: dotnet test passed 97 unit tests in FluentTimer.Core.Tests
 
 ## Steps
 
-- [ ] Add `PinTimerList` to `PillSettings` in `Settings.cs` and unit test in `SettingsTests.cs`
-- [ ] Expose `PinTimerList` in `SettingsVm.cs` and add toggle switch in `SettingsPage.xaml`
-- [ ] Add pin toggle button in `PillWindow.xaml` and handle click/visual state in `PillWindow.xaml.cs`
-- [ ] Update `UpdatePresence()`, `Refresh()`, and `CursorState()` in `PillWindow.xaml.cs` to honor `PinTimerList` and maintain proper fade/click-through behavior
-- [ ] Verify build, run test suite (`dotnet test`), and check widget behavior
+- [x] Add `PinTimerList` to `PillSettings` in `Settings.cs` and unit test in `SettingsTests.cs`
+- [x] Expose `PinTimerList` in `SettingsVm.cs` and add toggle switch in `SettingsPage.xaml`
+- [x] Add pin toggle button in `PillWindow.xaml` and handle click/visual state in `PillWindow.xaml.cs`
+- [x] Update `UpdatePresence()`, `Refresh()`, and `CursorState()` in `PillWindow.xaml.cs` to honor `PinTimerList` and maintain proper fade/click-through behavior
+- [x] Verify build, run test suite (`dotnet test`), and check widget behavior
 - [ ] Perform review with `ticket.mjs pack` and stamp with `ticket.mjs review`
 
 ## Risks
