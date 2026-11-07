@@ -51,6 +51,9 @@ public sealed class PillSettings
 
     /// <summary>Stand the widget upright when it is snapped to the left or right screen edge.</summary>
     public bool VerticalOnSides { get; set; } = true;
+
+    /// <summary>Keep the expanded list of active timers pinned open continuously on screen.</summary>
+    public bool PinTimerList { get; set; }
 }
 
 public sealed class AppSettings

@@ -136,7 +136,9 @@ public partial class PillWindow : Window
         IdleBar.Visibility = idle && !_expanded ? Visibility.Visible : Visibility.Collapsed;
         IdleHover.Visibility = idle && _expanded ? Visibility.Visible : Visibility.Collapsed;
         TimerContent.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
-        ListPanel.Visibility = !idle && _expanded ? Visibility.Visible : Visibility.Collapsed;
+        var pinned = _host.Settings.Pill.PinTimerList;
+        ListPanel.Visibility = !idle && (_expanded || pinned) ? Visibility.Visible : Visibility.Collapsed;
+        SyncPinVisuals();
         Pill.Opacity = idle && !_expanded ? 0.75 : 1;
         ApplyOrientation(idle);
         if (idle) return;
@@ -238,9 +240,17 @@ public partial class PillWindow : Window
             return new Rect(Left + o.X, Top + o.Y, e.ActualWidth * _scale, e.ActualHeight * _scale);
         }
         var pill = RectOf(Pill);
-        var over = pill.Contains(p) || ListPanel.IsVisible && RectOf(ListPanel).Contains(p) || ContextMenu is { IsOpen: true };
+        var listVisible = ListPanel.IsVisible;
+        var listRect = listVisible ? RectOf(ListPanel) : Rect.Empty;
+        var over = pill.Contains(p) || (listVisible && listRect.Contains(p)) || ContextMenu is { IsOpen: true };
         pill.Inflate(NearDistance, NearDistance);
-        return (over, over || pill.Contains(p));
+        var near = over || pill.Contains(p);
+        if (listVisible)
+        {
+            listRect.Inflate(NearDistance, NearDistance);
+            near |= listRect.Contains(p);
+        }
+        return (over, near);
     }
 
     private bool CursorIsOver() => CursorState().Over;
@@ -522,6 +532,22 @@ public partial class PillWindow : Window
     private void OnNew(object sender, RoutedEventArgs e) => App.Current.ShowQuickEntry();
 
     private void OnOpen(object sender, RoutedEventArgs e) => App.Current.ShowMain();
+
+    private void OnPinToggle(object sender, RoutedEventArgs e)
+    {
+        var pinned = PinToggle.IsChecked == true;
+        _host.Settings.Pill.PinTimerList = pinned;
+        _host.SettingsChanged();
+        SyncPinVisuals();
+        Refresh();
+    }
+
+    private void SyncPinVisuals()
+    {
+        var pinned = _host.Settings.Pill.PinTimerList;
+        if (PinToggle.IsChecked != pinned) PinToggle.IsChecked = pinned;
+        PinToggle.ToolTip = pinned ? "Unpin timer list" : "Pin: keep timer list open";
+    }
 
     // ---- Positioning ------------------------------------------------------------------------
 
