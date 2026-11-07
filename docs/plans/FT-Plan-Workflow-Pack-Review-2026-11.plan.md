@@ -1,7 +1,7 @@
 ---
 title: Plan - Process: Sync token-lean pack and review workflow from AI-Dev-Workflow
 ticket: https://app.notion.com/p/FT-Plan-Process-Sync-token-lean-pack-and-review-workflow-from-AI-Dev-Workflow-4110b9c6786f8127bf32c96541eacb17
-status: in-progress
+status: shipped
 priority: medium
 state: quick
 due: 
@@ -11,6 +11,7 @@ branch: chore/workflow-v2
 worktree: workflow-v2
 reviewedBy: Gemini
 reviewVerdict: pass
+pr: https://github.com/AaronPG095/FluentTimer/pull/4
 ---
 # Sync token-lean pack and review workflow from AI-Dev-Workflow
 
