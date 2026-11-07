@@ -410,4 +410,68 @@ public class TimerEngineTests
         Assert.Equal(new DateOnly(2026, 10, 14), TimerEngine.NextOccurrenceDate(new TimeOnly(16, 0), now));
         Assert.Equal(new DateOnly(2026, 10, 15), TimerEngine.NextOccurrenceDate(new TimeOnly(9, 0), now));
     }
+
+    [Fact]
+    public void StageSaved_creates_timer_in_paused_state_with_full_duration()
+    {
+        var f = new EngineFixture();
+        var countdownSaved = new SavedTimer { Name = "Tea", Duration = 4 * Min, Repeat = true };
+        var stagedCountdown = f.Engine.StageSaved(countdownSaved);
+
+        Assert.Equal(TimerState.Paused, stagedCountdown.State);
+        Assert.Equal(4 * Min, stagedCountdown.Duration);
+        Assert.Equal(4 * Min, stagedCountdown.PausedRemaining);
+        Assert.Null(stagedCountdown.EndsAtUtc);
+        Assert.Equal("Tea", stagedCountdown.Label);
+        Assert.True(stagedCountdown.Repeat);
+        Assert.Equal(countdownSaved.Id, stagedCountdown.SavedTimerId);
+
+        var pomoSaved = new SavedTimer { Name = "Deep Work", Kind = TimerKind.Pomodoro, Planned = 4 };
+        var stagedPomo = f.Engine.StageSaved(pomoSaved);
+
+        Assert.Equal(TimerState.Paused, stagedPomo.State);
+        Assert.Equal(TimerKind.Pomodoro, stagedPomo.Kind);
+        Assert.Equal(PomodoroPhase.Work, stagedPomo.Phase);
+        Assert.Equal(25 * Min, stagedPomo.Duration);
+        Assert.Equal(25 * Min, stagedPomo.PausedRemaining);
+        Assert.Equal(4, stagedPomo.Planned);
+        Assert.Equal(pomoSaved.Id, stagedPomo.SavedTimerId);
+    }
+
+    [Fact]
+    public void ApplyStartupTimers_stages_and_autostarts_configured_saved_timers()
+    {
+        var f = new EngineFixture();
+        var staged = new SavedTimer { Name = "Sitting Allowance", Duration = 120 * Min, Startup = SavedTimerStartup.StagePaused };
+        var auto = new SavedTimer { Name = "Morning Standup", Duration = 15 * Min, Startup = SavedTimerStartup.AutoStart };
+        var none = new SavedTimer { Name = "Nap", Duration = 20 * Min, Startup = SavedTimerStartup.None };
+
+        f.State.SavedTimers.AddRange([staged, auto, none]);
+        f.Engine.ApplyStartupTimers();
+
+        Assert.Equal(2, f.State.Timers.Count);
+
+        var sittingTimer = Assert.Single(f.State.Timers, t => t.Label == "Sitting Allowance");
+        Assert.Equal(TimerState.Paused, sittingTimer.State);
+        Assert.Equal(120 * Min, sittingTimer.PausedRemaining);
+
+        var standupTimer = Assert.Single(f.State.Timers, t => t.Label == "Morning Standup");
+        Assert.Equal(TimerState.Running, standupTimer.State);
+    }
+
+    [Fact]
+    public void ApplyStartupTimers_skips_duplicates_if_timer_already_active()
+    {
+        var f = new EngineFixture();
+        var staged = new SavedTimer { Name = "Sitting Allowance", Duration = 120 * Min, Startup = SavedTimerStartup.StagePaused };
+        f.State.SavedTimers.Add(staged);
+
+        // Pre-existing timer from previous session
+        f.Engine.StageSaved(staged);
+        Assert.Single(f.State.Timers);
+
+        // Re-applying startup timers does not duplicate
+        f.Engine.ApplyStartupTimers();
+        Assert.Single(f.State.Timers);
+    }
 }

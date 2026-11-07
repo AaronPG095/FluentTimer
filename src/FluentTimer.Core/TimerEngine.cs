@@ -57,9 +57,63 @@ public sealed class TimerEngine
     }
 
     /// <summary>Start a saved timer: a countdown (name, length, repeat) or a Pomodoro (name, planned sessions).</summary>
-    public TimerItem StartSaved(SavedTimer saved) => saved.IsPomodoro
-        ? StartPomodoro(saved.Name, saved.Planned)
-        : StartCountdown(saved.Duration, saved.Name, repeat: saved.Repeat);
+    public TimerItem StartSaved(SavedTimer saved)
+    {
+        var timer = saved.IsPomodoro
+            ? StartPomodoro(saved.Name, saved.Planned)
+            : StartCountdown(saved.Duration, saved.Name, repeat: saved.Repeat);
+        timer.SavedTimerId = saved.Id;
+        return timer;
+    }
+
+    /// <summary>Stage a saved timer in a paused state at full duration ready to be started.</summary>
+    public TimerItem StageSaved(SavedTimer saved)
+    {
+        var len = saved.IsPomodoro ? Settings.Pomodoro.PhaseLength(PomodoroPhase.Work) : saved.Duration;
+        if (len <= TimeSpan.Zero) len = TimeSpan.FromMinutes(25);
+        var timer = new TimerItem
+        {
+            Kind = saved.Kind,
+            Label = saved.Name.Trim(),
+            Repeat = !saved.IsPomodoro && saved.Repeat,
+            Planned = saved.IsPomodoro && saved.Planned is { } n ? Math.Clamp(n, 1, MaxPlanned) : null,
+            Phase = PomodoroPhase.Work,
+            Duration = len,
+            InitialDuration = len,
+            State = TimerState.Paused,
+            PausedRemaining = len,
+            StartedAtUtc = Now,
+            SavedTimerId = saved.Id,
+        };
+        State.Timers.Add(timer);
+        Changed?.Invoke();
+        return timer;
+    }
+
+    /// <summary>
+    /// Evaluates saved timers configured to stage or run at startup.
+    /// Skips any saved timer that is already represented in active timers.
+    /// </summary>
+    public void ApplyStartupTimers()
+    {
+        var activeIds = State.Timers.Where(t => t.SavedTimerId != null).Select(t => t.SavedTimerId!.Value).ToHashSet();
+        foreach (var saved in State.SavedTimers)
+        {
+            if (activeIds.Contains(saved.Id)) continue;
+            if (!string.IsNullOrWhiteSpace(saved.Name) && State.Timers.Any(t => t.Label == saved.Name.Trim() && t.Kind == saved.Kind))
+                continue;
+
+            switch (saved.Startup)
+            {
+                case SavedTimerStartup.StagePaused:
+                    StageSaved(saved);
+                    break;
+                case SavedTimerStartup.AutoStart:
+                    StartSaved(saved);
+                    break;
+            }
+        }
+    }
 
     /// <summary>Save a running (or finished) timer so it can be started again later. Returns the new entry.</summary>
     public SavedTimer? SaveAsTimer(Guid timerId)
