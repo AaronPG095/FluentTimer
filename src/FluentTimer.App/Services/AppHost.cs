@@ -94,6 +94,7 @@ internal sealed class AppHost : IDisposable
     public void Start()
     {
         ApplySettings();
+        Engine.ApplyStartupTimers();
         SyncTimers();
         Engine.RaisePendingAlerts();
         _tick.Start();

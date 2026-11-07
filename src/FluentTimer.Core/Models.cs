@@ -48,6 +48,9 @@ public sealed class TimerItem
     /// <summary>For breaks started by an interval reminder.</summary>
     public Guid? ReminderId { get; set; }
 
+    /// <summary>For timers started or staged from a saved timer.</summary>
+    public Guid? SavedTimerId { get; set; }
+
     public AlertSettings? AlertOverride { get; set; }
 
     public TimeSpan Remaining(DateTime utcNow) => State switch
@@ -76,6 +79,13 @@ public sealed class TimerItem
     };
 }
 
+public enum SavedTimerStartup
+{
+    None,
+    StagePaused,
+    AutoStart,
+}
+
 /// <summary>A named countdown you start with one click (like a reminder, but on demand).</summary>
 public sealed class SavedTimer
 {
@@ -83,6 +93,9 @@ public sealed class SavedTimer
     public string Name { get; set; } = "";
     public TimeSpan Duration { get; set; } = TimeSpan.FromMinutes(25);
     public bool Repeat { get; set; }
+
+    /// <summary>Behavior on app launch: None, StagePaused (opened at full duration), or AutoStart.</summary>
+    public SavedTimerStartup Startup { get; set; } = SavedTimerStartup.None;
 
     /// <summary>Countdown (uses Duration/Repeat) or Pomodoro (uses the Pomodoro settings and Planned).</summary>
     public TimerKind Kind { get; set; } = TimerKind.Countdown;

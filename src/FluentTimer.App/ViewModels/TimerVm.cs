@@ -73,7 +73,7 @@ public sealed class TimerVm : ObservableObject
 
     /// <summary>Segoe Fluent Icons: Pause / Play.</summary>
     public string PauseGlyph => IsRunning ? "" : "";
-    public string PauseText => IsRunning ? "Pause" : (IsPomodoro && Model.PausedRemaining == Model.Duration ? "Start" : "Resume");
+    public string PauseText => IsRunning ? "Pause" : (Model.PausedRemaining == Model.Duration ? "Start" : "Resume");
 
     /// <summary>Sort key: ringing first, then soonest running, then paused.</summary>
     public (int, TimeSpan) SortKey(DateTime now) => (State switch
