@@ -1,6 +1,10 @@
-# Fluent Timer
+# FluentTimer
 
-A Windows timer that lives in your tray and starts with Windows. A small floating widget, inspired by Wispr Flow's bar, keeps your current timer on screen. You can drag it anywhere and it snaps to screen edges. Styled after FluentOverlay.
+A native Windows timer with a floating desktop widget, Pomodoro sessions, interval reminders, alarms and time tracking. Built with C#, WPF and .NET 10.
+
+**[Latest release](https://github.com/AaronPG095/FluentTimer/releases/latest)** · **[Roadmap](docs/ROADMAP.md)**
+
+FluentTimer runs from the system tray and can start with Windows. Its movable widget keeps active timers accessible without opening the main window. The app includes keyboard-driven quick entry, custom alerts and CSV history export.
 
 ## Features
 
