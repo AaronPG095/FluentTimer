@@ -184,6 +184,29 @@ public sealed class SavedTimerVm : ObservableObject
         set { Model.Repeat = value; OnPropertyChanged(); _host.StateEdited(); }
     }
 
+    public static IReadOnlyList<string> StartupChoices { get; } = ["None", "Stage (paused)", "Auto-start"];
+
+    public string StartupChoice
+    {
+        get => Model.Startup switch
+        {
+            SavedTimerStartup.StagePaused => "Stage (paused)",
+            SavedTimerStartup.AutoStart => "Auto-start",
+            _ => "None",
+        };
+        set
+        {
+            Model.Startup = value switch
+            {
+                "Stage (paused)" => SavedTimerStartup.StagePaused,
+                "Auto-start" => SavedTimerStartup.AutoStart,
+                _ => SavedTimerStartup.None,
+            };
+            OnPropertyChanged();
+            _host.StateEdited();
+        }
+    }
+
     /// <summary>Two-way: switch this saved timer between a countdown and a Pomodoro.</summary>
     public bool IsPomodoro
     {

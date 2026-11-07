@@ -43,6 +43,9 @@ public sealed class PillSettings
     public bool ShowWhenIdle { get; set; } = true;
     public bool Hidden { get; set; }
 
+    /// <summary>Keep the active timer's name visible on the resting widget pill.</summary>
+    public bool ShowTimerName { get; set; } = true;
+
     /// <summary>Dim the widget and let clicks pass through it while the cursor is away.</summary>
     public bool FadeWhenAway { get; set; } = true;
 

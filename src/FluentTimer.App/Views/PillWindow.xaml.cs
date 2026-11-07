@@ -147,7 +147,7 @@ public partial class PillWindow : Window
         PillTime.Text = _vertical ? first!.TimeText.Replace(":", "\n") : first!.TimeText;
         AutomationProperties.SetName(Pill, $"{first.Label}, {first.TimeText} left");
         PillLabel.Text = first.Label;
-        PillLabel.Visibility = !_vertical && (_expanded || _host.Timers.Count == 1 && first.Label.Length <= 14)
+        PillLabel.Visibility = !_vertical && !string.IsNullOrWhiteSpace(first.Label) && (_expanded || _host.Settings.Pill.ShowTimerName)
             ? Visibility.Visible : Visibility.Collapsed;
         var extra = _host.Timers.Count - 1;
         Badge.Visibility = extra > 0 ? Visibility.Visible : Visibility.Collapsed;
