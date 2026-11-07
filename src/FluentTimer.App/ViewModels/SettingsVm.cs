@@ -130,6 +130,7 @@ public sealed class SettingsVm : ObservableObject
             : "Starts quietly in the tray when you sign in to Windows";
     public bool ShowWidget { get => !S.Pill.Hidden; set { S.Pill.Hidden = !value; Save(); } }
     public bool ShowWhenIdle { get => S.Pill.ShowWhenIdle; set { S.Pill.ShowWhenIdle = value; Save(); } }
+    public bool ShowTimerName { get => S.Pill.ShowTimerName; set { S.Pill.ShowTimerName = value; Save(); } }
     public static IReadOnlyList<string> WidgetSizeChoices { get; } = Enum.GetNames<WidgetSize>();
     public string WidgetSizeChoice
     {

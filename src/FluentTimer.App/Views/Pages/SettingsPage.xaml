@@ -125,6 +125,13 @@
                     </Grid>
                     <Grid Style="{StaticResource Row}">
                         <StackPanel>
+                            <TextBlock Text="Show timer name on widget" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Keeps the active timer's name visible on the pill at rest" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding ShowTimerName, Mode=TwoWay}" />
+                    </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
                             <TextBlock Text="Widget size" Style="{StaticResource BodyText}" />
                             <TextBlock Text="Also in the widget's right-click menu" Style="{StaticResource MutedText}" />
                         </StackPanel>
