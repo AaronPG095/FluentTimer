@@ -1,7 +1,7 @@
 ---
 title: Plan - Feature: Pinned Multi-Timer Widget List
 ticket: https://app.notion.com/p/FT-Plan-Feature-Pinned-Multi-Timer-Widget-List-4110b9c6786f81f99b22fb5b1053016d
-status: in-progress
+status: shipped
 priority: medium
 state: quick
 due: 
@@ -11,6 +11,7 @@ devTicketKey: FT:FT-Plan-Pinned-Multi-Timer-Widget-2026-11
 agent: Gemini
 branch: feat/pinned-multi-timer-widget
 worktree: FluentTimer
+pr: https://github.com/AaronPG095/FluentTimer/pull/5
 ---
 # Pinned Multi-Timer Widget List
 
