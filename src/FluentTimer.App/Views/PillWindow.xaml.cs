@@ -9,6 +9,7 @@ using System.Windows.Media.Animation;
 using System.Windows.Shapes;
 using System.Windows.Threading;
 using FluentTimer.App.Services;
+using FluentTimer.App.ViewModels;
 using FluentTimer.Core;
 
 namespace FluentTimer.App.Views;
@@ -135,7 +136,13 @@ public partial class PillWindow : Window
         var idle = first is null;
         IdleBar.Visibility = idle && !_expanded ? Visibility.Visible : Visibility.Collapsed;
         IdleHover.Visibility = idle && _expanded ? Visibility.Visible : Visibility.Collapsed;
-        TimerContent.Visibility = idle ? Visibility.Collapsed : Visibility.Visible;
+        var multi = !idle && !_vertical && _host.Timers.Count > 1 && _host.Settings.Pill.ShowAllTimersInPill;
+        TimerContent.Visibility = idle || multi ? Visibility.Collapsed : Visibility.Visible;
+        MultiTimerContent.Visibility = multi ? Visibility.Visible : Visibility.Collapsed;
+        if (multi && MultiTimerContent.ItemsSource != _host.Timers)
+            MultiTimerContent.ItemsSource = _host.Timers;
+        Pill.CornerRadius = new CornerRadius(multi ? 16 : 15);
+        FlashLayer.CornerRadius = new CornerRadius(multi ? 16 : 15);
         var pinned = _host.Settings.Pill.PinTimerList;
         ListPanel.Visibility = !idle && (_expanded || pinned) ? Visibility.Visible : Visibility.Collapsed;
         SyncPinVisuals();
@@ -440,9 +447,22 @@ public partial class PillWindow : Window
 
     private Action? _undoLastClick;
     private DateTime _lastClickUtc;
+    private Guid? _targetTimerId;
+
+    private static Guid? FindTimerId(object? source)
+    {
+        if (source is not DependencyObject dep) return null;
+        while (dep != null)
+        {
+            if (dep is FrameworkElement { DataContext: TimerVm vm }) return vm.Id;
+            dep = VisualTreeHelper.GetParent(dep);
+        }
+        return null;
+    }
 
     private void OnPillMouseDown(object sender, MouseButtonEventArgs e)
     {
+        _targetTimerId = FindTimerId(e.OriginalSource);
         if (e.ClickCount >= 2)
         {
             // The first click already acted (instantly); a double-click means "open the app", so undo it.
@@ -487,7 +507,8 @@ public partial class PillWindow : Window
             _host.Alerts.Dismiss(a);
             return null; // dismissing can't be undone; the double-click still opens the app
         }
-        var first = _host.Timers.FirstOrDefault();
+        var target = _targetTimerId is { } tid ? _host.Timers.FirstOrDefault(t => t.Id == tid) : null;
+        var first = target ?? _host.Timers.FirstOrDefault();
         if (first is null)
         {
             App.Current.ShowQuickEntry();

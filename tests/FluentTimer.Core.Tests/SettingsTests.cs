@@ -54,4 +54,29 @@ public class SettingsTests
         Assert.NotNull(restored);
         Assert.True(restored.Pill.PinTimerList);
     }
+
+    [Fact]
+    public void PillSettings_defaults_ShowAllTimersInPill_to_true()
+    {
+        var settings = new PillSettings();
+        Assert.True(settings.ShowAllTimersInPill);
+    }
+
+    [Fact]
+    public void AppSettings_round_trips_ShowAllTimersInPill_through_json()
+    {
+        var original = new AppSettings
+        {
+            Pill = new PillSettings
+            {
+                ShowAllTimersInPill = false,
+            },
+        };
+
+        var json = JsonSerializer.Serialize(original);
+        var restored = JsonSerializer.Deserialize<AppSettings>(json);
+
+        Assert.NotNull(restored);
+        Assert.False(restored.Pill.ShowAllTimersInPill);
+    }
 }

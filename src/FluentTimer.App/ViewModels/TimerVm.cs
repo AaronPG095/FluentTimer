@@ -64,12 +64,20 @@ public sealed class TimerVm : ObservableObject
             OnPropertyChanged(nameof(IsRinging));
             OnPropertyChanged(nameof(PauseGlyph));
             OnPropertyChanged(nameof(PauseText));
+            OnPropertyChanged(nameof(DotAccentVisible));
+            OnPropertyChanged(nameof(DotBreakVisible));
+            OnPropertyChanged(nameof(PillTimeOpacity));
         }
     }
 
     public bool IsRunning => State == TimerState.Running;
     public bool IsPaused => State == TimerState.Paused;
     public bool IsRinging => State == TimerState.Ringing;
+
+    public bool DotAccentVisible => IsRunning && !Model.IsOnBreak;
+    public bool DotBreakVisible => IsRunning && Model.IsOnBreak;
+    public double PillTimeOpacity => IsRunning ? 1.0 : 0.6;
+    public bool ShowPillLabel => (Services.AppHost.Current?.Settings.Pill.ShowTimerName ?? true) && !string.IsNullOrWhiteSpace(Label);
 
     /// <summary>Segoe Fluent Icons: Pause / Play.</summary>
     public string PauseGlyph => IsRunning ? "" : "";
@@ -102,6 +110,10 @@ public sealed class TimerVm : ObservableObject
         if (Model.Repeat) Subtitle += " · repeats";
         if (IsPaused) Subtitle += " · paused";
         if (IsPomodoro) UpdatePomodoro();
+        OnPropertyChanged(nameof(DotAccentVisible));
+        OnPropertyChanged(nameof(DotBreakVisible));
+        OnPropertyChanged(nameof(PillTimeOpacity));
+        OnPropertyChanged(nameof(ShowPillLabel));
     }
 
     // ---- Pomodoro ---------------------------------------------------------------------------
@@ -113,7 +125,16 @@ public sealed class TimerVm : ObservableObject
     private string _setKey = "";
 
     /// <summary>Pomodoro (or reminder) break: drawn in the break colour instead of the accent.</summary>
-    public bool IsOnBreak { get => _isOnBreak; private set => SetProperty(ref _isOnBreak, value); }
+    public bool IsOnBreak
+    {
+        get => _isOnBreak;
+        private set
+        {
+            if (!SetProperty(ref _isOnBreak, value)) return;
+            OnPropertyChanged(nameof(DotAccentVisible));
+            OnPropertyChanged(nameof(DotBreakVisible));
+        }
+    }
     public string PhaseText { get => _phaseText; private set => SetProperty(ref _phaseText, value); }
 
     /// <summary>"3 / 8 today": completed pomodoros against the daily goal.</summary>
