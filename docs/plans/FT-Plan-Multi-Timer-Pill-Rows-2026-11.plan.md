@@ -1,7 +1,7 @@
 ---
 title: Plan - Feature: Multi-Timer Rows in Pill Widget
 ticket: https://app.notion.com/p/FT-Plan-Feature-Multi-Timer-Rows-in-Pill-Widget-4110b9c6786f8165b5c9e99131f160e8
-status: in-progress
+status: shipped
 priority: medium
 state: flow
 due: 
@@ -11,6 +11,7 @@ branch: feat/multi-timer-pill-rows
 worktree: FluentTimer
 reviewedBy: Gemini
 reviewVerdict: pass
+pr: https://github.com/AaronPG095/FluentTimer/pull/6
 ---
 # Feature: Multi-Timer Rows in Pill Widget
 
