@@ -1,6 +1,6 @@
 name: Plan check
 
-# Every non-trivial PR carries a plan under docs/plans/ with a Notion ticket, and every
+# Every non-trivial PR carries a plan under docs/plans/ with a ticket, and every
 # checkbox in it is ticked or marked "deferred: <reason>". See "Development process" in AGENTS.md.
 # Trivial PRs: add the "no-plan" label.
 
@@ -24,6 +24,9 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: '22'
+
+      - name: Test ticket CLI
+        run: node --test scripts/ticket.test.mjs
 
       - name: Check changed plans
         env:
