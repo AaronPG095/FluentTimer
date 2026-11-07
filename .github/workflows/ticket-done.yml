@@ -2,7 +2,7 @@ name: Close ticket on merge
 
 # When a PR merges, set the Notion Task of each plan it changed to Done.
 # Needs the repository secret NOTION_TOKEN (Notion internal integration shared with the Tasks database);
-# without it the job logs a notice and does nothing.
+# without it (or in local tracker mode) the job logs a notice and exits cleanly.
 
 on:
   pull_request:

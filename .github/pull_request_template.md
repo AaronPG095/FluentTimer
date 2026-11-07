@@ -1,5 +1,6 @@
 Plan: docs/plans/<file>.plan.md
-Ticket: <Notion Task URL>
+Ticket: <Notion Task URL or local:// key>
+Review: <pass | warn | n/a (trivial)>
 
 ## What changed
 

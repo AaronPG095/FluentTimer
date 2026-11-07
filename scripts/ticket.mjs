@@ -1,23 +1,25 @@
 #!/usr/bin/env node
-// Ticket workflow CLI shared by every AI client (Claude, Codex, Gemini/Antigravity, Cursor) and CI.
+// Ticket and review workflow CLI shared by every AI client (Claude, Codex, Gemini/Antigravity, Cursor) and CI.
 // The process it enforces is described in AGENTS.md ("Development process").
 //
-//   node scripts/ticket.mjs create <plan> --agent <Claude|Codex|Gemini|Other>   Notion Task (To Do), URL written into the plan
-//   node scripts/ticket.mjs start  <plan>                                      Task -> Doing, branch + worktree recorded
-//   node scripts/ticket.mjs log    <plan> --agent <client> --message "<text>"  handoff line in the plan's Progress log
-//   node scripts/ticket.mjs check  <plan>                                      fails while any checkbox is open or a ticked
-//                                                                              criterion has no "verified:" evidence
-//   node scripts/ticket.mjs ship   <plan> --pr <url>                           check, link PR on the Task, add a comment
-//   node scripts/ticket.mjs done   <plan>                                      Task -> Done (normally run by CI on merge)
-//   node scripts/ticket.mjs ci-check --base <sha> --head <sha>                 CI: changed plans must pass check and keep every
-//                                                                              checkbox; "no-plan" PRs must stay small
-//   node scripts/ticket.mjs ci-done  --head <merge sha>                        CI: set merged plans' Tasks to Done
+//   node scripts/ticket.mjs create [<plan>] --agent <Claude|Codex|Gemini|Other>   Development Task (To Do, stable key), URL written into the plan
+//   node scripts/ticket.mjs start  [<plan>]                                       Task -> Doing, branch + worktree recorded
+//   node scripts/ticket.mjs log    [<plan>] --agent <client> --message "<text>"   handoff line in the plan's Progress log
+//   node scripts/ticket.mjs pack   [<plan>] [--base <ref>]                        0-token review packet (plan criteria + hygiene + filtered diff)
+//   node scripts/ticket.mjs review [<plan>] --agent <client> --verdict <pass|warn|block> --summary "<text>"
+//   node scripts/ticket.mjs check  [<plan>]                                       fails while any checkbox is open, a ticked criterion has no
+//                                                                                 "verified:" evidence, or review verdict is "block"
+//   node scripts/ticket.mjs ship   [<plan>] --pr <url>                            check, link PR on the Task, add a comment
+//   node scripts/ticket.mjs done   [<plan>]                                       Task -> Done (normally run by CI on merge)
+//   node scripts/ticket.mjs ci-check --base <sha> --head <sha>                    CI: changed plans must pass check and keep every
+//                                                                                 checkbox; "no-plan" PRs must stay small
+//   node scripts/ticket.mjs ci-done  --head <merge sha>                           CI: set merged plans' Tasks to Done
 //
 // Options: --dry-run prints Notion requests instead of sending them and does not modify the plan.
-// Auth: NOTION_TOKEN from the environment or the repository's .env file (Notion internal integration
-// shared with the Tasks database).
+// Tracker: "notion" (default when dataSourceId is set) or "local" (offline/public markdown-only mode).
+// Auth: NOTION_TOKEN from the environment, the repository's .env, or the main git checkout's .env when in a worktree.
 
-import { readFileSync, writeFileSync, existsSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, readdirSync } from 'node:fs';
 import { dirname, join, resolve, relative, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
@@ -26,6 +28,29 @@ const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
 const config = JSON.parse(readFileSync(join(here, 'ticket.config.json'), 'utf8'));
 const NOTION_VERSION = '2025-09-03';
+const isLocal = config.tracker === 'local' || !config.dataSourceId;
+
+// Title format from .cursor/rules/notion-workspaces.mdc: {PROJECT} - {MODE} - {TYPE}: {Title}. The script adds the project prefix.
+const MODES = config.titleModes || ['Plan', 'Debug', 'Ask'];
+const TITLE = new RegExp(`^(${MODES.join('|')}) - [^:]+: \\S`);
+// Optional plan frontmatter -> Task select properties (option names as they exist in the Tasks database).
+const OPTIONAL = {
+  priority: { property: 'Priority', values: { emergency: '‼️EMERGENCY‼️', critical: '🎯 Critical', high: '⭐ High', medium: '⚡Medium', low: '🚫 Low' } },
+  state: { property: 'State', values: { quick: '💥Quick', easy: '💚Easy', flow: '🌊Flow' } },
+};
+const VERDICTS = ['pass', 'warn', 'block'];
+const DEFAULT_PACK_IGNORE = [
+  'pnpm-lock.yaml',
+  'package-lock.json',
+  'yarn.lock',
+  'bun.lockb',
+  'Cargo.lock',
+  'packages.lock.json',
+  '*.min.js',
+  '*.min.css',
+  '*.Designer.cs',
+];
+const today = () => new Date().toLocaleDateString('sv-SE', { timeZone: config.timeZone || 'Europe/Berlin' });
 
 const [command, ...rest] = process.argv.slice(2);
 const opts = { files: [] };
@@ -39,6 +64,10 @@ for (let i = 0; i < rest.length; i++) {
 function fail(message) {
   console.error(`ticket: ${message}`);
   process.exit(1);
+}
+
+function hasTicket(value) {
+  return isLocal ? /^(https|local):\/\//.test(value || '') : /^https:\/\//.test(value || '');
 }
 
 // ---------- plan files ----------
@@ -76,10 +105,16 @@ function section(body, heading) {
   return out.join('\n').trim();
 }
 
-function problems(plan, { requireTicket = true } = {}) {
+function problems(plan, { requireTicket = true, ignoreReview = false } = {}) {
   const found = [];
   if (!plan.meta.title || plan.meta.title.startsWith('<')) found.push('frontmatter has no title');
-  if (requireTicket && !/^https:\/\//.test(plan.meta.ticket || '')) found.push(`no Notion ticket URL (run: node scripts/ticket.mjs create ${plan.rel} --agent <client>)`);
+  else if (!TITLE.test(plan.meta.title)) found.push(`title must read "<${MODES.join('|')}> - <Type>: <Title>", e.g. "Plan - Feature: Smart Shortcut Suggestions" (got "${plan.meta.title}")`);
+  for (const [key, { values }] of Object.entries(OPTIONAL)) {
+    const v = (plan.meta[key] || '').toLowerCase();
+    if (v && !Object.hasOwn(values, v)) found.push(`${key} must be one of ${Object.keys(values).join(', ')}, or empty (got "${plan.meta[key]}")`);
+  }
+  if (plan.meta.due && (!/^\d{4}-\d{2}-\d{2}$/.test(plan.meta.due) || !Number.isFinite(Date.parse(plan.meta.due)) || new Date(plan.meta.due).toISOString().slice(0, 10) !== plan.meta.due)) found.push(`due must be YYYY-MM-DD, or empty (got "${plan.meta.due}")`);
+  if (requireTicket && !hasTicket(plan.meta.ticket)) found.push(`no ${isLocal ? 'ticket' : 'Notion ticket'} URL (run: node scripts/ticket.mjs create ${plan.rel} --agent <client>)`);
   if (!/^\s*- \[[ xX]\]/m.test(section(plan.body, 'Steps'))) found.push('Steps section has no checkboxes');
   if (!/^\s*- \[[ xX]\]/m.test(section(plan.body, 'Acceptance criteria'))) found.push('Acceptance criteria section has no checkboxes');
   for (const line of plan.body.split('\n')) {
@@ -87,6 +122,13 @@ function problems(plan, { requireTicket = true } = {}) {
   }
   for (const line of section(plan.body, 'Acceptance criteria').split('\n')) {
     if (/^\s*- \[[xX]\]/.test(line) && !/verified:/i.test(line)) found.push(`criterion ticked without evidence (append "verified: <how it was checked>"): ${line.trim()}`);
+  }
+  if (!ignoreReview) {
+    const verdict = (plan.meta.reviewVerdict || '').toLowerCase();
+    if (verdict === 'block') found.push('review verdict is block (resolve findings and re-run review)');
+    else if (config.requireReview && !['pass', 'warn'].includes(verdict)) {
+      found.push(`no passing review recorded (run: node scripts/ticket.mjs pack ${plan.rel}, then node scripts/ticket.mjs review ${plan.rel} --agent <client> --verdict pass --summary "<findings>")`);
+    }
   }
   return found;
 }
@@ -101,8 +143,13 @@ function bodyOf(text) {
   return m ? norm.slice(m[0].length) : norm;
 }
 
-function git(args) {
-  return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+function git(args, { allowFail = false } = {}) {
+  try {
+    return execFileSync('git', args, { cwd: repoRoot, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'] }).trim();
+  } catch (e) {
+    if (allowFail) return '';
+    throw e;
+  }
 }
 
 // The plan as it was before this branch changed it: at the merge base if it already existed, otherwise its first commit on the branch.
@@ -132,21 +179,31 @@ function pageId(url) {
 
 // ---------- Notion API ----------
 
+function readEnvToken(envPath) {
+  if (!existsSync(envPath)) return '';
+  const m = readFileSync(envPath, 'utf8').match(/^\s*NOTION_TOKEN\s*=\s*"?([^"\r\n]+)"?/m);
+  return m ? m[1].trim() : '';
+}
+
 function token() {
   if (process.env.NOTION_TOKEN) return process.env.NOTION_TOKEN.trim();
-  const env = join(repoRoot, '.env');
-  if (!existsSync(env)) return '';
-  const m = readFileSync(env, 'utf8').match(/^\s*NOTION_TOKEN\s*=\s*"?([^"\r\n]+)"?/m);
-  return m ? m[1].trim() : '';
+  const localToken = readEnvToken(join(repoRoot, '.env'));
+  if (localToken) return localToken;
+  const commonDir = git(['rev-parse', '--git-common-dir'], { allowFail: true });
+  if (commonDir) {
+    const mainToken = readEnvToken(resolve(repoRoot, commonDir, '..', '.env'));
+    if (mainToken) return mainToken;
+  }
+  return '';
 }
 
 async function notion(method, path, body, { soft = false } = {}) {
   if (opts.dryRun) {
     console.log(`[dry-run] ${method} https://api.notion.com/v1/${path}\n${JSON.stringify(body, null, 2)}`);
-    return { url: 'https://www.notion.so/dry-run-00000000000000000000000000000000', id: 'dry-run' };
+    return { url: 'https://www.notion.so/dry-run-00000000000000000000000000000000', id: 'dry-run', results: [], has_more: false };
   }
   const auth = token();
-  if (!auth) fail('NOTION_TOKEN is not set (environment or .env). Stop here and tell the user; do not create the ticket another way.');
+  if (!auth) fail('NOTION_TOKEN is not set (environment, .env, or main checkout .env). Stop here and tell the user; do not create the ticket another way.');
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch(`https://api.notion.com/v1/${path}`, {
       method,
@@ -161,21 +218,92 @@ async function notion(method, path, body, { soft = false } = {}) {
     const json = await res.json().catch(() => ({}));
     if (!res.ok) {
       const message = `Notion ${method} ${path} failed (${res.status}): ${json.message || res.statusText}`;
-      if (soft) throw new Error(message);
+      if (soft) throw Object.assign(new Error(message), { status: res.status, code: json.code });
       fail(message);
     }
     return json;
   }
 }
 
-const setStatus = (url, name) => notion('PATCH', `pages/${pageId(url)}`, { properties: { Status: { status: { name } } } });
+// Status changes through the API don't press the Doing/Done buttons, so the dates those buttons set are written here.
+async function startTicket(url) {
+  if (isLocal || /^local:\/\//.test(url || '')) return;
+  const id = pageId(url);
+  const page = await notion('GET', `pages/${id}`);
+  const started = page.properties?.['Started At']?.date?.start;
+  return notion('PATCH', `pages/${id}`, { properties: { Status: { status: { name: 'Doing' } }, ...(started ? {} : { 'Started At': { date: { start: today() } } }) } });
+}
+
+// Development tickets explicitly start To Do, independently of the general Life OS default.
+function ticketKey(plan) {
+  if (plan.meta.devTicketKey) return plan.meta.devTicketKey;
+  if (!plan.rel.startsWith(`${config.plansDir}/`)) fail('plan must be inside the configured plansDir');
+  return `${config.prefix}:${basename(plan.rel, '.plan.md')}`;
+}
+
+async function existingTicket(key) {
+  const page = await notion('POST', `data_sources/${config.dataSourceId}/query`, {
+    filter: { property: 'Dev Ticket Key', rich_text: { equals: key } }, page_size: 2,
+  });
+  if (!Array.isArray(page.results)) fail('Notion returned no query results; stop rather than risk creating a duplicate');
+  if (page.has_more || page.results.length > 1) fail(`multiple Tasks have Dev Ticket Key "${key}"; resolve the duplicate before continuing`);
+  return page.results?.[0];
+}
+
+function recordTicket(plan, page, key, { recovered = false, agent } = {}) {
+  if (!hasTicket(page.url || '')) fail('Notion returned no canonical ticket URL; stop and inspect the Task before retrying');
+  plan.meta.ticket = page.url;
+  plan.meta.devTicketKey = key;
+  if (!recovered) {
+    plan.meta.status = 'planned';
+    plan.meta.agent = agent;
+  }
+  writePlan(plan);
+  console.log(`Ticket ${recovered ? 'recovered' : 'created (To Do)'}: ${page.url}\nPlan updated: ${plan.rel}`);
+}
+
+const closeTicket = (url) => {
+  if (isLocal || /^local:\/\//.test(url || '')) return Promise.resolve();
+  return notion('PATCH', `pages/${pageId(url)}`, { properties: { Status: { status: { name: 'Done' } }, 'Completed At': { date: { start: today() } } } });
+};
 const text = (content) => [{ text: { content: content.slice(0, 1990) } }];
 
-// ---------- commands ----------
+// ---------- plan resolution & diff helpers ----------
+
+function allPlans() {
+  const dir = join(repoRoot, config.plansDir);
+  if (!existsSync(dir)) return [];
+  return readdirSync(dir)
+    .filter(f => f.endsWith('.plan.md') && !f.startsWith('_'))
+    .map(f => join(dir, f))
+    .filter(full => readFileSync(full, 'utf8').startsWith('---'))
+    .map(full => readPlan(full));
+}
+
+function resolveActivePlan() {
+  const plans = allPlans();
+  if (!plans.length) fail(`usage: node scripts/ticket.mjs ${command} <plan-file> (no plans found in ${config.plansDir})`);
+  const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true });
+  const protectedList = [...(config.protectedBranches || ['main', 'master', 'develop']), 'HEAD', ''];
+  if (!protectedList.includes(branch)) {
+    const byBranch = plans.filter(p => p.meta.branch === branch);
+    if (byBranch.length === 1) return byBranch[0];
+    const base = resolveDiffBase();
+    if (base) {
+      const branchPlans = changedPlans([`${base}..HEAD`]);
+      if (branchPlans.length === 1) return readPlan(join(repoRoot, branchPlans[0]));
+    }
+  }
+  const inProgress = plans.filter(p => p.meta.status === 'in-progress');
+  if (inProgress.length === 1) return inProgress[0];
+  if (plans.length === 1) return plans[0];
+  fail(`usage: node scripts/ticket.mjs ${command} <plan-file> (multiple plans present; specify which one)`);
+}
 
 function onePlan() {
-  if (opts.files.length !== 1) fail(`usage: node scripts/ticket.mjs ${command} <plan-file>`);
-  return readPlan(opts.files[0]);
+  if (opts.files.length === 1) return readPlan(opts.files[0]);
+  if (opts.files.length === 0) return resolveActivePlan();
+  fail(`usage: node scripts/ticket.mjs ${command} <plan-file>`);
 }
 
 function changedPlans(args) {
@@ -185,59 +313,184 @@ function changedPlans(args) {
     .filter(f => existsSync(join(repoRoot, f)) && readFileSync(join(repoRoot, f), 'utf8').startsWith('---'));
 }
 
+function resolveDiffBase() {
+  if (opts.base) return git(['merge-base', opts.base, 'HEAD'], { allowFail: true }) || opts.base;
+  const candidates = (config.protectedBranches || ['main', 'master', 'develop'])
+    .flatMap(b => [`origin/${b}`, b]);
+  for (const ref of candidates) {
+    const mb = git(['merge-base', ref, 'HEAD'], { allowFail: true });
+    if (mb) return mb;
+  }
+  return git(['rev-parse', 'HEAD~1'], { allowFail: true }) || git(['rev-parse', 'HEAD'], { allowFail: true });
+}
+
+function isIgnoredDiffPath(filePath, ignorePatterns) {
+  const name = basename(filePath);
+  return ignorePatterns.some(pattern => {
+    if (pattern.startsWith('*.')) return name.endsWith(pattern.slice(1));
+    return filePath === pattern || name === pattern;
+  });
+}
+
+function formatFilteredDiff(rawDiff, { maxFileLines, maxLines, ignorePatterns }) {
+  if (!rawDiff.trim()) return '(no code diff against base)';
+  const chunks = rawDiff.replace(/\r\n/g, '\n').split(/(?=^diff --git )/m).filter(Boolean);
+  const out = [];
+  let totalLines = 0;
+  let skippedFiles = [];
+
+  for (const chunk of chunks) {
+    const headerMatch = chunk.match(/^diff --git a\/(.+?) b\/(.+)$/m);
+    const filePath = headerMatch ? headerMatch[2] : 'unknown';
+    if (isIgnoredDiffPath(filePath, ignorePatterns)) {
+      skippedFiles.push(filePath);
+      continue;
+    }
+    const lines = chunk.trimEnd().split('\n');
+    const slice = lines.length > maxFileLines
+      ? [...lines.slice(0, maxFileLines), `... [truncated ${lines.length - maxFileLines} lines in ${filePath}]`]
+      : lines;
+    if (totalLines + slice.length > maxLines && out.length > 0) {
+      out.push(`... [truncated remaining diff after ${totalLines} lines; inspect specific files directly if needed]`);
+      break;
+    }
+    out.push(slice.join('\n'));
+    totalLines += slice.length;
+  }
+
+  const prefix = skippedFiles.length ? `Skipped noisy files: ${skippedFiles.join(', ')}\n\n` : '';
+  return prefix + (out.join('\n\n') || '(only ignored files changed)');
+}
+
+// ---------- commands ----------
+
 const commands = {
   async create() {
     const plan = onePlan();
-    if (/^https:\/\//.test(plan.meta.ticket || '')) fail(`${plan.rel} already has a ticket: ${plan.meta.ticket}`);
-    const pre = problems(plan, { requireTicket: false }).filter(p => !p.startsWith('open item'));
+    if (hasTicket(plan.meta.ticket)) fail(`${plan.rel} already has a ticket: ${plan.meta.ticket}`);
+    const pre = problems(plan, { requireTicket: false, ignoreReview: true }).filter(p => !p.startsWith('open item'));
     if (pre.length) fail(`fix the plan first:\n- ${pre.join('\n- ')}`);
     const agent = opts.agent || process.env.AI_CLIENT || '';
     if (!config.captureSources.includes(agent)) fail(`--agent must be one of: ${config.captureSources.join(', ')}`);
+    if (opts.status && opts.status !== 'To Do') fail('development tickets start To Do; use start after creation to begin work');
+    const key = ticketKey(plan);
+    if (isLocal) {
+      return recordTicket(plan, { url: `local://${key}` }, key, { agent });
+    }
     const description = [
       section(plan.body, 'Summary'),
       `Acceptance criteria:\n${section(plan.body, 'Acceptance criteria')}`,
       `Plan: ${plan.rel}`,
     ].join('\n\n');
-    const page = await notion('POST', 'pages', {
-      parent: { type: 'data_source_id', data_source_id: config.dataSourceId },
-      properties: {
-        Name: { title: text(`${config.prefix} - ${plan.meta.title}`) },
-        Status: { status: { name: 'To Do' } },
-        Project: { relation: [{ id: config.projectPageId }] },
-        Tag: { select: { name: config.tag } },
-        Description: { rich_text: text(description) },
-        'Capture Source': { select: { name: agent } },
-        'Capture State': { select: { name: 'Pending' } },
-      },
-    });
-    plan.meta.ticket = page.url;
-    plan.meta.status = 'planned';
-    plan.meta.agent = agent;
-    writePlan(plan);
-    console.log(`Ticket created: ${page.url}\nPlan updated: ${plan.rel}`);
+    const existing = await existingTicket(key);
+    if (existing) return recordTicket(plan, existing, key, { recovered: true });
+    const parent = { type: 'data_source_id', data_source_id: config.dataSourceId };
+    const properties = {
+      Name: { title: text(`${config.prefix} - ${plan.meta.title}`) },
+      Status: { status: { name: 'To Do' } },
+      'Task Lane': { select: { name: 'Development' } },
+      'Dev Ticket Key': { rich_text: text(key) },
+      Project: { relation: [{ id: config.projectPageId }] },
+      Tag: { select: { name: config.tag } },
+      Description: { rich_text: text(description) },
+      'Capture Source': { select: { name: agent } },
+      'Capture State': { select: { name: 'Pending' } },
+    };
+    for (const [key, { property, values }] of Object.entries(OPTIONAL)) {
+      const v = (plan.meta[key] || '').toLowerCase();
+      if (v) properties[property] = { select: { name: values[v] } };
+    }
+    if (plan.meta.due) properties['Due Date'] = { date: { start: plan.meta.due } };
+    let page;
+    if (config.lifeAreaPageId) {
+      try {
+        page = await notion('POST', 'pages', { parent, properties: { ...properties, 'Life Area': { relation: [{ id: config.lifeAreaPageId }] } } }, { soft: true });
+      } catch (e) {
+        if (!((e.status === 400 && e.code === 'validation_error' && /Life Area/i.test(e.message)) || (e.status === 404 && e.code === 'object_not_found'))) throw e;
+        console.warn(`ticket: creating the Task with Life Area failed (${e.message}); retrying without it. To fix, share the Life Areas database with the Notion connection.`);
+      }
+    }
+    if (!page) page = await notion('POST', 'pages', { parent, properties });
+    recordTicket(plan, page, key, { agent });
   },
 
   async start() {
     const plan = onePlan();
-    if (!/^https:\/\//.test(plan.meta.ticket || '')) fail(`${plan.rel} has no ticket yet; run create first.`);
+    if (!hasTicket(plan.meta.ticket)) fail(`${plan.rel} has no ticket yet; run create first.`);
     const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
     if ([...(config.protectedBranches || ['main', 'master', 'develop']), 'HEAD'].includes(branch)) fail(`you are on "${branch}". Create a branch for this plan first.`);
-    await setStatus(plan.meta.ticket, 'Doing');
+    await startTicket(plan.meta.ticket);
     plan.meta.status = 'in-progress';
     plan.meta.branch = branch;
     plan.meta.worktree = basename(git(['rev-parse', '--show-toplevel']));
+    if (isLocal && !plan.meta.startedAt) plan.meta.startedAt = today();
     writePlan(plan);
     console.log(`Ticket set to Doing: ${plan.meta.ticket}\nBranch ${branch} recorded in ${plan.rel}`);
   },
 
   async log() {
     const plan = onePlan();
-    if (!opts.message) fail('usage: node scripts/ticket.mjs log <plan> --agent <client> --message "<done>; next: <step>; open: <questions>"');
+    if (!opts.message) fail('usage: node scripts/ticket.mjs log [<plan>] --agent <client> --message "<done>; next: <step>; open: <questions>"');
     const agent = opts.agent || process.env.AI_CLIENT || 'Unknown';
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
     plan.body = appendToSection(plan.body, 'Progress log', `- ${stamp} UTC, ${agent}: ${opts.message.replace(/\s+/g, ' ').trim()}`);
     writePlan(plan);
     console.log(`Progress logged in ${plan.rel}`);
+  },
+
+  async pack() {
+    const plan = onePlan();
+    const base = resolveDiffBase();
+    const maxFileLines = Number(opts['max-file-lines'] || config.packMaxFileLines || 120);
+    const maxLines = Number(opts['max-lines'] || config.packMaxLines || 400);
+    const ignorePatterns = [...DEFAULT_PACK_IGNORE, ...(config.packIgnore || [])];
+    const checkIssues = problems(plan, { requireTicket: false, ignoreReview: true });
+    const deferred = deferredItems(plan.body);
+    const statusShort = git(['status', '--short'], { allowFail: true });
+    const diffStat = base ? git(['diff', '--stat', base], { allowFail: true }) : '';
+    const rawDiff = base ? git(['diff', '--unified=3', base, '--', '.', `:(exclude)${config.plansDir}`], { allowFail: true }) : '';
+    const filteredDiff = formatFilteredDiff(rawDiff, { maxFileLines, maxLines, ignorePatterns });
+
+    const lines = [
+      `# Review Packet: ${plan.meta.title || plan.rel}`,
+      `Plan: ${plan.rel} | Status: ${plan.meta.status || 'unknown'} | Branch: ${plan.meta.branch || git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true })}`,
+      `Ticket: ${plan.meta.ticket || 'none'} | Reviewed: ${plan.meta.reviewedBy ? `${plan.meta.reviewedBy} (${plan.meta.reviewVerdict || 'unknown'})` : 'not yet'}`,
+      ...(config.verifyCommand ? [`Verify command: \`${config.verifyCommand}\``] : []),
+      '',
+      '## Plan Summary',
+      section(plan.body, 'Summary') || '(none)',
+      '',
+      '## Acceptance Criteria',
+      section(plan.body, 'Acceptance criteria') || '(none)',
+      ...(deferred.length ? ['', '## Deferred Items', ...deferred] : []),
+      '',
+      '## Hygiene & Plan Gate',
+      checkIssues.length ? `Plan issues:\n- ${checkIssues.join('\n- ')}` : 'Plan checkboxes & evidence: OK',
+      statusShort ? `Working tree status:\n${statusShort}` : 'Working tree: clean',
+      '',
+      `## Diff Stat (base: ${base ? base.slice(0, 10) : 'none'})`,
+      diffStat || '(no changes)',
+      '',
+      '## Code Diff (filtered)',
+      filteredDiff,
+    ];
+    console.log(lines.join('\n'));
+  },
+
+  async review() {
+    const plan = onePlan();
+    const agent = opts.agent || process.env.AI_CLIENT || '';
+    if (!config.captureSources.includes(agent)) fail(`--agent must be one of: ${config.captureSources.join(', ')}`);
+    const verdict = (opts.verdict || 'pass').toLowerCase();
+    if (!VERDICTS.includes(verdict)) fail(`--verdict must be one of: ${VERDICTS.join(', ')}`);
+    const summary = (opts.summary || opts.message || '').replace(/\s+/g, ' ').trim();
+    if (!summary) fail('usage: node scripts/ticket.mjs review [<plan>] --agent <client> --verdict <pass|warn|block> --summary "<findings>"');
+    const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
+    plan.meta.reviewedBy = agent;
+    plan.meta.reviewVerdict = verdict;
+    plan.body = appendToSection(plan.body, 'Progress log', `- ${stamp} UTC, ${agent} (review: ${verdict}): ${summary}`);
+    writePlan(plan);
+    console.log(`Review (${verdict}) recorded in ${plan.rel} by ${agent}`);
   },
 
   async check() {
@@ -252,15 +505,19 @@ const commands = {
     const found = problems(plan);
     if (found.length) fail(`${plan.rel} is not closed out:\n- ${found.join('\n- ')}`);
     if (!/^https:\/\//.test(opts.pr || '')) fail('ship needs --pr <pull request URL>; open the PR first.');
-    const id = pageId(plan.meta.ticket);
     const deferred = deferredItems(plan.body);
     const deferredText = deferred.length ? `Deferred (${deferred.length}):\n${deferred.join('\n')}` : 'Deferred: none';
-    await notion('PATCH', `pages/${id}`, { properties: { URL: { url: opts.pr } } });
-    console.log(`Copy into the PR's "Deferred" section:\n${deferred.length ? deferred.join('\n') : 'None'}`);
-    try {
-      await notion('POST', 'comments', { parent: { page_id: id }, rich_text: text(`Shipped for review: ${opts.pr}\nPlan ${plan.rel} is closed out. The Task moves to Done when the PR merges.\n${deferredText}`) }, { soft: true });
-    } catch (e) {
-      console.warn(`ticket: could not add a comment (${e.message}); the PR link is set.`);
+    if (!isLocal && /^https:\/\//.test(plan.meta.ticket || '')) {
+      const id = pageId(plan.meta.ticket);
+      await notion('PATCH', `pages/${id}`, { properties: { URL: { url: opts.pr } } });
+      console.log(`Copy into the PR's "Deferred" section:\n${deferred.length ? deferred.join('\n') : 'None'}`);
+      try {
+        await notion('POST', 'comments', { parent: { page_id: id }, rich_text: text(`Shipped for review: ${opts.pr}\nPlan ${plan.rel} is closed out. The Task moves to Done when the PR merges.\n${deferredText}`) }, { soft: true });
+      } catch (e) {
+        console.warn(`ticket: could not add a comment (${e.message}); the PR link is set.`);
+      }
+    } else {
+      console.log(`Copy into the PR's "Deferred" section:\n${deferred.length ? deferred.join('\n') : 'None'}`);
     }
     plan.meta.status = 'shipped';
     plan.meta.pr = opts.pr;
@@ -270,8 +527,13 @@ const commands = {
 
   async done() {
     const plan = onePlan();
-    if (!/^https:\/\//.test(plan.meta.ticket || '')) fail(`${plan.rel} has no ticket.`);
-    await setStatus(plan.meta.ticket, 'Done');
+    if (!hasTicket(plan.meta.ticket)) fail(`${plan.rel} has no ticket.`);
+    await closeTicket(plan.meta.ticket);
+    if (isLocal) {
+      plan.meta.status = 'done';
+      plan.meta.completedAt = today();
+      writePlan(plan);
+    }
     console.log(`Ticket set to Done: ${plan.meta.ticket}`);
   },
 
@@ -309,11 +571,11 @@ const commands = {
 
   async 'ci-done'() {
     if (!opts.head) fail('usage: ci-done --head <merge sha>');
-    if (!token() && !opts.dryRun) return console.log('NOTION_TOKEN secret not set; skipping ticket close.');
+    if (!isLocal && !token() && !opts.dryRun) return console.log('NOTION_TOKEN secret not set; skipping ticket close.');
     for (const f of changedPlans([`${opts.head}^1`, opts.head])) {
       const plan = readPlan(join(repoRoot, f));
-      if (/^https:\/\//.test(plan.meta.ticket || '')) {
-        await setStatus(plan.meta.ticket, 'Done');
+      if (hasTicket(plan.meta.ticket)) {
+        await closeTicket(plan.meta.ticket);
         console.log(`${f}: ticket set to Done.`);
       }
     }
