@@ -15,7 +15,7 @@ Run:
 node scripts/ticket.mjs pack
 ```
 
-*(Pass `<plan-path>` only if multiple plans are active on the branch, and `--base <ref>` only if reviewing against a non-default base.)*
+*(Pass `--test` to execute the repository's verifyCommand and embed test execution proof directly in the packet. Pass `<plan-path>` only if multiple plans are active on the branch, and `--base <ref>` only if reviewing against a non-default base.)*
 
 Do **not** separately run `git status`, `git diff`, `git log`, or read the plan file unless a specific hunk in `pack` was truncated and must be inspected to confirm a real bug.
 
