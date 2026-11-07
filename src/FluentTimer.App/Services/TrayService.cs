@@ -26,9 +26,35 @@ internal sealed class TrayService : IDisposable
         _icon.TrayLeftMouseUp += (_, _) => App.Current.ShowMain();
         _icon.ContextMenu.Opened += (_, _) => BuildMenu(_icon.ContextMenu);
         BuildMenu(_icon.ContextMenu);
-        _icon.ForceCreate(enablesEfficiencyMode: false);
+        TryForceCreate();
 
         host.Ticked += UpdateTooltip;
+    }
+
+    private void TryForceCreate()
+    {
+        try
+        {
+            _icon.ForceCreate(enablesEfficiencyMode: false);
+        }
+        catch (InvalidOperationException)
+        {
+            // Windows shell tray registration can fail if explorer is holding a stale icon or busy.
+            // Retry asynchronously on the dispatcher after a short delay so startup never crashes.
+            Application.Current.Dispatcher.InvokeAsync(async () =>
+            {
+                for (int i = 0; i < 5; i++)
+                {
+                    await Task.Delay(1000);
+                    try
+                    {
+                        _icon.ForceCreate(enablesEfficiencyMode: false);
+                        break;
+                    }
+                    catch (InvalidOperationException) { }
+                }
+            });
+        }
     }
 
     private void UpdateTooltip()

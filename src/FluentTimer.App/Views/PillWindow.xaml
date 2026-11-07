@@ -135,6 +135,38 @@
                     </Border>
                 </StackPanel>
 
+                <!-- Multi-row running timers -->
+                <ItemsControl x:Name="MultiTimerContent" Visibility="Collapsed" Margin="11,4,12,4">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Grid Height="26" Margin="0,1" Background="Transparent" ToolTip="{Binding Label}">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
+                                <Grid Width="12" Height="12" Margin="0,0,8,0" VerticalAlignment="Center">
+                                    <Ellipse Width="8" Height="8" Fill="{DynamicResource OverlayAccentBrush}"
+                                             Visibility="{Binding DotAccentVisible, Converter={StaticResource BoolToVis}}" />
+                                    <Ellipse Width="8" Height="8" Fill="{DynamicResource BreakBrush}"
+                                             Visibility="{Binding DotBreakVisible, Converter={StaticResource BoolToVis}}" />
+                                    <TextBlock Style="{StaticResource Glyph}" Text="&#xE769;" FontSize="10"
+                                               Foreground="{DynamicResource NoResultsForeground}"
+                                               Visibility="{Binding IsPaused, Converter={StaticResource BoolToVis}}" />
+                                </Grid>
+                                <TextBlock Grid.Column="1" Text="{Binding TimeText}" FontFamily="{StaticResource MonoFont}"
+                                           FontSize="13" FontWeight="SemiBold" Foreground="{DynamicResource OverlayForegroundBrush}"
+                                           VerticalAlignment="Center" Margin="0,0,8,0" Opacity="{Binding PillTimeOpacity}" />
+                                <TextBlock Grid.Column="2" Text="{Binding Label}" Style="{StaticResource MutedText}"
+                                           MaxWidth="170" TextTrimming="CharacterEllipsis" TextWrapping="NoWrap"
+                                           VerticalAlignment="Center"
+                                           Visibility="{Binding ShowPillLabel, Converter={StaticResource BoolToVis}}" />
+                            </Grid>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+
+
                 <!-- Alerting -->
                 <StackPanel x:Name="AlertContent" Orientation="Horizontal" Margin="12,0,6,0" Height="34" Visibility="Collapsed">
                     <TextBlock Style="{StaticResource Glyph}" Text="&#xEA8F;" Foreground="White" Margin="0,0,8,0" />

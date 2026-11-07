@@ -54,6 +54,9 @@ public sealed class PillSettings
 
     /// <summary>Keep the expanded list of active timers pinned open continuously on screen.</summary>
     public bool PinTimerList { get; set; }
+
+    /// <summary>Display all active timers under one another in the pill instead of stacking them behind a +N badge.</summary>
+    public bool ShowAllTimersInPill { get; set; } = true;
 }
 
 public sealed class AppSettings

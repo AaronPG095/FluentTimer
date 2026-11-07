@@ -159,6 +159,13 @@
                         </StackPanel>
                         <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding PinTimerList, Mode=TwoWay}" />
                     </Grid>
+                    <Grid Style="{StaticResource Row}">
+                        <StackPanel>
+                            <TextBlock Text="Show all active timers in widget" Style="{StaticResource BodyText}" />
+                            <TextBlock Text="Display each active timer under one another in the pill instead of stacking them with a +N badge" Style="{StaticResource MutedText}" />
+                        </StackPanel>
+                        <ui:ToggleSwitch HorizontalAlignment="Right" IsChecked="{Binding ShowAllTimersInPill, Mode=TwoWay}" />
+                    </Grid>
                 </StackPanel>
             </Border>
 
