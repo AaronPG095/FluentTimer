@@ -107,7 +107,11 @@ globalThis.fetch = async (url, init) => {
         return [];
       }
     })();
-    return { ...result, calls, plan: readFileSync(plan, 'utf8') };
+    return {
+      ...result,
+      calls,
+      plan: existsSync(plan) ? readFileSync(plan, 'utf8') : '',
+    };
   }
   function git(...args) {
     return execFileSync('git', args, {
@@ -783,4 +787,233 @@ test('ci-check allows workflow infrastructure sync under no-plan', (t) => {
   });
   assert.equal(r.status, 0, r.stderr);
   assert.match(r.stdout, /allowed as workflow infrastructure sync/i);
+});
+
+test('tick and defer commands update plan checkboxes without manual markdown edits', (t) => {
+  const f = fixture(
+    t,
+    'status: in-progress\nticket: https://www.notion.so/test\nbranch: feat/test\n'
+  );
+
+  const planPath = f.plan;
+  writeFileSync(
+    planPath,
+    `---
+title: Plan - Feature: Tick Test
+ticket: https://www.notion.so/test
+status: in-progress
+branch: feat/test
+---
+# Tick Test
+
+## Summary
+Testing tick and defer.
+
+## Acceptance criteria
+- [ ] Criterion 1
+- [ ] Criterion 2
+
+## Steps
+- [ ] Step 1
+- [ ] Step 2
+`
+  );
+
+  const rFail = f.run('tick', ['1'], [], { omitPlan: true });
+  assert.equal(rFail.status, 1);
+  assert.match(rFail.stderr, /requires verified evidence/i);
+
+  const rTick1 = f.run(
+    'tick',
+    ['1', '--verified', 'tested manually'],
+    [],
+    { omitPlan: true }
+  );
+  assert.equal(rTick1.status, 0, rTick1.stderr);
+  assert.match(rTick1.stdout, /Ticked \[1\]/);
+
+  const rDefer = f.run(
+    'defer',
+    ['Step 2', '--reason', 'out of scope'],
+    [],
+    { omitPlan: true }
+  );
+  assert.equal(rDefer.status, 0, rDefer.stderr);
+  assert.match(rDefer.stdout, /Deferred/);
+
+  const updated = readFileSync(planPath, 'utf8');
+  assert.match(updated, /- \[x\] Criterion 1 verified: tested manually/);
+  assert.match(updated, /- \[ \] Step 2 deferred: out of scope/);
+});
+
+test('prime command numbers open checkboxes sequentially', (t) => {
+  const f = fixture(
+    t,
+    'status: in-progress\nticket: https://www.notion.so/test\nbranch: feat/prime-test\n'
+  );
+  writeFileSync(
+    f.plan,
+    `---
+title: Plan - Process: Test
+status: in-progress
+ticket: https://www.notion.so/test
+branch: feat/prime-test
+---
+# Test
+
+## Summary
+Test fixture
+
+## Acceptance criteria
+- [ ] Works
+
+## Steps
+- [ ] Implement
+`
+  );
+  const r = f.run('prime', [], [], { omitPlan: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /\[1\] - \[ \] Works/);
+  assert.match(r.stdout, /Tip: Run `node scripts\/ticket\.mjs tick <#>`/);
+});
+
+test('new command with --summary, --criteria, --steps, and --create scaffolds and tickets in one shot', (t) => {
+  const f = fixture(t, 'status: draft\n', [], { tracker: 'local' });
+  const r = f.run(
+    'new',
+    [
+      '"Fast Feature"',
+      '--summary',
+      '"Fast summary text"',
+      '--criteria',
+      '"C1|C2"',
+      '--steps',
+      '"S1|S2"',
+      '--create',
+      '--agent',
+      'Gemini',
+    ],
+    [],
+    { omitPlan: true }
+  );
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /Created plan: docs\/plans\/FO-Plan-Fast-Feature/);
+  assert.match(r.stdout, /Ticket created/);
+
+  const month = new Date().toISOString().slice(0, 7);
+  const planPath = join(
+    f.root,
+    `docs/plans/FO-Plan-Fast-Feature-${month}.plan.md`
+  );
+  assert.equal(existsSync(planPath), true);
+  const content = readFileSync(planPath, 'utf8');
+  assert.match(content, /Fast summary text/);
+  assert.match(content, /- \[ \] C1/);
+  assert.match(content, /- \[ \] S1/);
+});
+
+test('recall command searches across ADRs and plans', (t) => {
+  const f = fixture(
+    t,
+    'status: in-progress\nticket: https://www.notion.so/test\n'
+  );
+  f.run('adr', ['"Use SQLite for Cache"'], [], { omitPlan: true });
+
+  const r = f.run('recall', ['SQLite'], [], { omitPlan: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /=== Recall: "SQLite"/);
+  assert.match(r.stdout, /ADR-001-use-sqlite-for-cache\.md/);
+});
+
+test('archive command safely moves completed plans into archive folder', (t) => {
+  const f = fixture(
+    t,
+    'status: done\nticket: https://www.notion.so/test\ncompletedAt: 2026-11-01\n'
+  );
+  const r = f.run('archive', [], [], { omitPlan: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(
+    r.stdout,
+    /Archived: docs\/plans\/FO-Plan-Test\.plan\.md -> docs\/plans\/archive\/2026-11\/FO-Plan-Test\.plan\.md/
+  );
+
+  const archivePath = join(
+    f.root,
+    'docs/plans/archive/2026-11/FO-Plan-Test.plan.md'
+  );
+  assert.equal(existsSync(archivePath), true);
+});
+
+test('doctor command reports repository diagnostics', (t) => {
+  const f = fixture(
+    t,
+    'status: in-progress\nticket: https://www.notion.so/test\n'
+  );
+  f.git('init', '-b', 'main');
+  f.git('add', '.');
+  f.git(
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.invalid',
+    'commit',
+    '-m',
+    'init'
+  );
+  const r = f.run('doctor', [], [], { omitPlan: true });
+  assert.equal(r.status, 0, r.stderr);
+  assert.match(r.stdout, /=== AI-Dev-Workflow Doctor/);
+  assert.match(r.stdout, /Branch:\s+main/);
+  assert.match(r.stdout, /Worktrees:/);
+});
+
+test('wt command lists worktrees and supports prune in dry-run mode', (t) => {
+  const f = fixture(
+    t,
+    'status: in-progress\nticket: https://www.notion.so/test\n'
+  );
+  f.git('init', '-b', 'main');
+  f.git('add', '.');
+  f.git(
+    '-c',
+    'user.name=Test',
+    '-c',
+    'user.email=test@example.invalid',
+    'commit',
+    '-m',
+    'init'
+  );
+
+  const rList = f.run('wt', ['list'], [], { omitPlan: true });
+  assert.equal(rList.status, 0, rList.stderr);
+
+  const rPrune = f.run('wt', ['prune', '--dry-run'], [], { omitPlan: true });
+  assert.equal(rPrune.status, 0, rPrune.stderr);
+  assert.match(rPrune.stdout, /Prune complete: 0 worktree\(s\) pruned\./);
+});
+
+test('public distribution and installer files integrity', () => {
+  const repoRoot = join(scripts, '..');
+  
+  // 1. Verify installer scripts exist
+  const ps1Path = join(repoRoot, 'scripts', 'install.ps1');
+  const shPath = join(repoRoot, 'scripts', 'install.sh');
+  assert.equal(existsSync(ps1Path), true, 'install.ps1 should exist');
+  assert.equal(existsSync(shPath), true, 'install.sh should exist');
+
+  const shContent = readFileSync(shPath, 'utf8');
+  assert.match(shContent, /AI-Dev-Workflow Installer/);
+  assert.match(shContent, /PREFIX=/);
+
+  // 2. Verify ticket.config.example.json is sanitized if present (upstream repo)
+  const examplePath = join(repoRoot, 'ticket.config.example.json');
+  if (existsSync(examplePath)) {
+    const exampleCfg = JSON.parse(readFileSync(examplePath, 'utf8'));
+    assert.deepEqual(exampleCfg.knownRepos, ['my-backend', 'my-frontend', 'my-shared-lib']);
+  }
+
+  // 3. Verify scripts/ticket.mjs WORKFLOW_FILES includes install.sh
+  const ticketMjsContent = readFileSync(join(repoRoot, 'scripts', 'ticket.mjs'), 'utf8');
+  assert.match(ticketMjsContent, /'scripts\/install\.sh'/);
+  assert.match(ticketMjsContent, /'scripts\/install\.ps1'/);
 });

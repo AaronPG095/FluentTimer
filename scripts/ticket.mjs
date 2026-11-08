@@ -26,6 +26,9 @@ import {
   readdirSync,
   unlinkSync,
   mkdirSync,
+  renameSync,
+  rmSync,
+  cpSync,
 } from 'node:fs';
 import { dirname, join, resolve, relative, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,6 +82,7 @@ const WORKFLOW_FILES = new Set([
   'scripts/sync.mjs',
   'scripts/sync-repos.ps1',
   'scripts/install.ps1',
+  'scripts/install.sh',
   'docs/plans/_template.plan.md',
   'docs/dev-workflow/setup-other-repos.md',
   '.agents/skills/quick-review/SKILL.md',
@@ -99,14 +103,35 @@ const today = () =>
 
 const [command, ...rest] = process.argv.slice(2);
 const opts = { files: [] };
+const BOOLEAN_FLAGS = new Set([
+  '--dry-run',
+  '--test',
+  '--branch',
+  '--draft',
+  '--fleet',
+  '--auto',
+  '--all',
+  '--verify',
+  '--force',
+  '--create',
+  '--start',
+]);
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
-  if (a === '--dry-run') opts.dryRun = true;
-  else if (a === '--test') opts.test = true;
-  else if (a === '--branch') opts.branch = true;
-  else if (a === '--draft') opts.draft = true;
-  else if (a.startsWith('--')) opts[a.slice(2)] = rest[++i];
-  else opts.files.push(a);
+  if (BOOLEAN_FLAGS.has(a)) {
+    const rawKey = a.slice(2);
+    const camel = rawKey.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    opts[rawKey] = true;
+    opts[camel] = true;
+  } else if (a.startsWith('--')) {
+    const rawKey = a.slice(2);
+    const camel = rawKey.replace(/-([a-z])/g, (_, c) => c.toUpperCase());
+    const val = rest[++i];
+    opts[rawKey] = val;
+    opts[camel] = val;
+  } else {
+    opts.files.push(a);
+  }
 }
 
 function fail(message) {
@@ -453,6 +478,14 @@ function allPlans() {
     .map((full) => readPlan(full));
 }
 
+function resolvePlanAndTarget() {
+  const planArg = opts.files.find((f) => f.endsWith('.plan.md'));
+  const plan = planArg ? readPlan(planArg) : resolveActivePlan();
+  const target =
+    opts.files.find((f) => !f.endsWith('.plan.md')) || opts.target || '';
+  return { plan, target };
+}
+
 function resolveActivePlan() {
   const plans = allPlans();
   if (!plans.length)
@@ -578,6 +611,62 @@ function formatFilteredDiff(
   return prefix + (out.join('\n\n') || '(only ignored files changed)');
 }
 
+function getKnownRepoDirs() {
+  const parentDir = dirname(repoRoot);
+  const candidateDirs = [];
+  const knownNames = config.knownRepos || [
+    'FluentOverlay',
+    'Fluent-Studio-Website',
+    'FluentTimer',
+    'TokenHUD',
+    'Fluent-Studio-Atlas',
+    'AI-Cortex',
+    'AI-Dev-Workflow',
+  ];
+  for (const name of knownNames) {
+    const p = join(parentDir, name);
+    if (existsSync(p) && !candidateDirs.includes(p)) candidateDirs.push(p);
+  }
+  if (!candidateDirs.includes(repoRoot)) candidateDirs.push(repoRoot);
+  return candidateDirs;
+}
+
+function findCheckboxes(body) {
+  const lines = body.split('\n');
+  const items = [];
+  let currentSection = '';
+  let openIndex = 0;
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (/^##\s+/.test(line)) {
+      currentSection = line.replace(/^##\s+/, '').trim();
+      continue;
+    }
+    const match = line.match(/^(\s*-\s*\[)([ xX])(\]\s*)(.*)$/);
+    if (match) {
+      const isChecked = match[2].toLowerCase() === 'x';
+      const text = match[4].trim();
+      const isDeferred = /deferred:/i.test(text);
+      if (!isChecked && !isDeferred) {
+        openIndex++;
+      }
+      items.push({
+        lineIndex: i,
+        prefix: match[1],
+        box: match[2],
+        delim: match[3],
+        text,
+        isChecked,
+        isDeferred,
+        section: currentSection,
+        openIndex: !isChecked && !isDeferred ? openIndex : null,
+      });
+    }
+  }
+  return { lines, items };
+}
+
 // ---------- commands ----------
 
 const commands = {
@@ -603,6 +692,30 @@ const commands = {
     const state = opts.state || '';
     const due = opts.due || '';
 
+    const summary = (opts.summary || '').replace(/^["']|["']$/g, '').trim();
+    const rawCriteria = (opts.criteria || '')
+      .replace(/^["']|["']$/g, '')
+      .trim();
+    const rawSteps = (opts.steps || '').replace(/^["']|["']$/g, '').trim();
+
+    const criteriaList = rawCriteria
+      ? rawCriteria
+          .split(/[|,\n]/)
+          .map((c) => c.trim())
+          .filter(Boolean)
+          .map((c) => `- [ ] ${c}`)
+          .join('\n')
+      : '- [ ] <Checkable outcome>';
+
+    const stepsList = rawSteps
+      ? rawSteps
+          .split(/[|,\n]/)
+          .map((s) => s.trim())
+          .filter(Boolean)
+          .map((s) => `- [ ] ${s}`)
+          .join('\n')
+      : '- [ ] <Step>';
+
     const templatePath = join(repoRoot, config.plansDir, '_template.plan.md');
     let template = existsSync(templatePath)
       ? readFileSync(templatePath, 'utf8')
@@ -617,6 +730,18 @@ const commands = {
         .replace(/^due:.*$/m, `due: ${due}`)
         .replace(/^# <Title>.*$/m, `# ${topic}`)
         .replace(/<!--[\s\S]*?-->\n*/m, '');
+      if (summary) {
+        content = content.replace(
+          /<2-3 sentences: what changes and why\.>/,
+          summary
+        );
+      }
+      if (rawCriteria) {
+        content = content.replace(/- \[ \] <Checkable outcome>/, criteriaList);
+      }
+      if (rawSteps) {
+        content = content.replace(/- \[ \] <Step>/, stepsList);
+      }
     } else {
       content = [
         '---',
@@ -631,15 +756,15 @@ const commands = {
         '',
         '## Summary',
         '',
-        '<2-3 sentences: what changes and why.>',
+        summary || '<2-3 sentences: what changes and why.>',
         '',
         '## Acceptance criteria',
         '',
-        '- [ ] <Checkable outcome>',
+        criteriaList,
         '',
         '## Steps',
         '',
-        '- [ ] <Step>',
+        stepsList,
         '',
         '## Risks',
         '',
@@ -663,8 +788,12 @@ const commands = {
     writeFileSync(fullPath, `${content.trimEnd()}\n`, 'utf8');
     console.log(`Created plan: ${relPath}`);
 
-    if (opts.branch) {
-      const agent = (opts.agent || process.env.AI_CLIENT || 'feat').toLowerCase();
+    if (opts.branch || opts.start) {
+      const agent = (
+        opts.agent ||
+        process.env.AI_CLIENT ||
+        'feat'
+      ).toLowerCase();
       const branchName = `${agent}/${kebabTopic.toLowerCase()}`;
       try {
         git(['checkout', '-b', branchName]);
@@ -672,6 +801,15 @@ const commands = {
       } catch (err) {
         console.warn(`Could not checkout branch ${branchName}: ${err.message}`);
       }
+    }
+
+    if (opts.create || opts.start) {
+      opts.files = [relPath];
+      await commands.create();
+    }
+    if (opts.start) {
+      opts.files = [relPath];
+      await commands.start();
     }
   },
 
@@ -683,18 +821,16 @@ const commands = {
     const statusShort = git(['status', '--short'], { allowFail: true }) || '';
     const clean = !statusShort.trim();
 
-    const criteriaSection = section(plan.body, 'Acceptance criteria') || '';
-    const stepsSection = section(plan.body, 'Steps') || '';
     const progressSection = section(plan.body, 'Progress log') || '';
-
-    const openCriteria = criteriaSection
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith('- [ ]'));
-    const openSteps = stepsSection
-      .split('\n')
-      .map((l) => l.trim())
-      .filter((l) => l.startsWith('- [ ]'));
+    const { items } = findCheckboxes(plan.body);
+    const openCriteria = items.filter(
+      (it) =>
+        it.openIndex !== null &&
+        it.section.toLowerCase() === 'acceptance criteria'
+    );
+    const openSteps = items.filter(
+      (it) => it.openIndex !== null && it.section.toLowerCase() === 'steps'
+    );
 
     const progressLines = progressSection
       .split('\n')
@@ -704,6 +840,8 @@ const commands = {
       ? progressLines[progressLines.length - 1]
       : '(none)';
 
+    const formatNumberedItem = (it) => `[${it.openIndex}] - [ ] ${it.text}`;
+
     const lines = [
       `# Session Context: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Status: ${plan.meta.status || 'unknown'} | Ticket: ${plan.meta.ticket || 'none'}`,
@@ -712,7 +850,7 @@ const commands = {
       '',
       `## Open Acceptance Criteria (${openCriteria.length} remaining)`,
       ...(openCriteria.length
-        ? openCriteria.slice(0, 5)
+        ? openCriteria.slice(0, 5).map(formatNumberedItem)
         : ['- None (all ticked or none defined)']),
       ...(openCriteria.length > 5
         ? [`  ... and ${openCriteria.length - 5} more`]
@@ -720,7 +858,7 @@ const commands = {
       '',
       `## Next Steps (${openSteps.length} remaining)`,
       ...(openSteps.length
-        ? openSteps.slice(0, 5)
+        ? openSteps.slice(0, 5).map(formatNumberedItem)
         : ['- None (all ticked or none defined)']),
       ...(openSteps.length > 5
         ? [`  ... and ${openSteps.length - 5} more`]
@@ -728,8 +866,129 @@ const commands = {
       '',
       '## Latest Progress',
       lastLog,
+      '',
+      'Tip: Run `node scripts/ticket.mjs tick <#>` to complete an item.',
     ];
     console.log(lines.join('\n'));
+  },
+
+  async tick() {
+    const { plan, target } = resolvePlanAndTarget();
+    if (!target) {
+      fail(
+        'usage: node scripts/ticket.mjs tick [<plan>] <index|substring> [--verified "<evidence>"]'
+      );
+    }
+    const { lines, items } = findCheckboxes(plan.body);
+    const openItems = items.filter((it) => it.openIndex !== null);
+    if (!openItems.length) {
+      fail(`all checkboxes in ${plan.rel} are already completed or deferred.`);
+    }
+
+    let match = null;
+    const isNum = /^\d+$/.test(target.trim());
+    if (isNum) {
+      const idx = parseInt(target.trim(), 10);
+      match = openItems.find((it) => it.openIndex === idx);
+      if (!match) {
+        fail(
+          `open item [${idx}] not found in ${plan.rel} (available open items: 1..${openItems.length})`
+        );
+      }
+    } else {
+      const query = target.toLowerCase();
+      match = openItems.find((it) => it.text.toLowerCase().includes(query));
+      if (!match) {
+        const alreadyTicked = items.find(
+          (it) => it.isChecked && it.text.toLowerCase().includes(query)
+        );
+        if (alreadyTicked) {
+          return console.log(
+            `Item is already ticked in ${plan.rel}:\n  ${lines[alreadyTicked.lineIndex].trim()}`
+          );
+        }
+        fail(`no open checkbox found matching "${target}" in ${plan.rel}`);
+      }
+    }
+
+    const inCriteria = match.section.toLowerCase() === 'acceptance criteria';
+    let verifiedText = opts.verified || opts.v || '';
+    if (inCriteria && !verifiedText && !/verified:/i.test(match.text)) {
+      fail(
+        `ticking an acceptance criterion requires verified evidence. Pass --verified "<how it was checked and result>".`
+      );
+    }
+
+    let updatedText = match.text;
+    if (verifiedText) {
+      if (/verified:/i.test(updatedText)) {
+        updatedText = updatedText.replace(
+          /verified:.*$/i,
+          `verified: ${verifiedText}`
+        );
+      } else {
+        updatedText = `${updatedText} verified: ${verifiedText}`;
+      }
+    }
+
+    lines[match.lineIndex] = `${match.prefix}x${match.delim}${updatedText}`;
+    plan.body = lines.join('\n');
+    writePlan(plan);
+
+    console.log(`Ticked [${match.openIndex}]: - [x] ${updatedText}`);
+
+    const remaining = items.filter(
+      (it) => it.openIndex !== null && it.lineIndex !== match.lineIndex
+    );
+    if (remaining.length > 0) {
+      const next = remaining[0];
+      console.log(
+        `Next open item: - [ ] ${next.text} (section: ${next.section})`
+      );
+    } else {
+      console.log('All criteria and steps in the plan are now completed!');
+    }
+  },
+
+  async defer() {
+    const { plan, target } = resolvePlanAndTarget();
+    const reason = opts.reason || opts.message || '';
+    if (!target || !reason) {
+      fail(
+        'usage: node scripts/ticket.mjs defer [<plan>] <index|substring> --reason "<why>"'
+      );
+    }
+    const { lines, items } = findCheckboxes(plan.body);
+    const openItems = items.filter((it) => it.openIndex !== null);
+    if (!openItems.length) {
+      fail(`all checkboxes in ${plan.rel} are already completed or deferred.`);
+    }
+
+    let match = null;
+    const isNum = /^\d+$/.test(target.trim());
+    if (isNum) {
+      const idx = parseInt(target.trim(), 10);
+      match = openItems.find((it) => it.openIndex === idx);
+      if (!match) {
+        fail(
+          `open item [${idx}] not found in ${plan.rel} (available open items: 1..${openItems.length})`
+        );
+      }
+    } else {
+      const query = target.toLowerCase();
+      match = openItems.find((it) => it.text.toLowerCase().includes(query));
+      if (!match) {
+        fail(`no open checkbox found matching "${target}" in ${plan.rel}`);
+      }
+    }
+
+    const cleanText = match.text.replace(/\s*deferred:.*$/i, '').trim();
+    const updatedText = `${cleanText} deferred: ${reason.replace(/\s+/g, ' ').trim()}`;
+    lines[match.lineIndex] = `${match.prefix} ${match.delim}${updatedText}`;
+    plan.body = lines.join('\n');
+    writePlan(plan);
+
+    console.log(`Deferred [${match.openIndex}]: - [ ] ${updatedText}`);
   },
 
   async create() {
@@ -815,9 +1074,17 @@ const commands = {
   },
 
   async start() {
-    const plan = onePlan();
-    if (!hasTicket(plan.meta.ticket))
-      fail(`${plan.rel} has no ticket yet; run create first.`);
+    let plan = onePlan();
+    if (!hasTicket(plan.meta.ticket)) {
+      if (opts.create) {
+        await commands.create();
+        plan = readPlan(plan.full);
+      } else {
+        fail(
+          `${plan.rel} has no ticket yet; run create first, or pass --create.`
+        );
+      }
+    }
     const branch = git(['rev-parse', '--abbrev-ref', 'HEAD']);
     if (
       [
@@ -1192,6 +1459,23 @@ const commands = {
       ].join('\n');
     }
 
+    if (opts.verify || opts.test) {
+      if (config.verifyCommand) {
+        console.log(`Running verifyCommand: ${config.verifyCommand}...`);
+        try {
+          execSync(config.verifyCommand, {
+            cwd: repoRoot,
+            encoding: 'utf8',
+            stdio: 'inherit',
+            env: { ...process.env, CI: '1' },
+          });
+          console.log('Verification passed.');
+        } catch (err) {
+          fail(`verifyCommand failed before opening PR: ${err.message}`);
+        }
+      }
+    }
+
     if (opts.dryRun || opts['dry-run']) {
       console.log('--- Dry Run: PR Title ---');
       console.log(plan.meta.title || plan.rel);
@@ -1200,8 +1484,26 @@ const commands = {
       return;
     }
 
+    try {
+      git(['push', '-u', 'origin', branch]);
+      console.log(`Branch ${branch} pushed to origin.`);
+    } catch (err) {
+      console.warn(
+        `Could not push branch ${branch} automatically: ${err.message}`
+      );
+    }
+
     const title = plan.meta.title || plan.rel;
-    const ghArgs = ['pr', 'create', '--title', title, '--body', body];
+    const ghArgs = [
+      'pr',
+      'create',
+      '--title',
+      title,
+      '--body',
+      body,
+      '--head',
+      branch,
+    ];
     if (opts.draft) ghArgs.push('--draft');
 
     let prUrl = '';
@@ -1234,6 +1536,25 @@ const commands = {
       console.warn(
         `Could not commit/push shipped state automatically: ${err.message}`
       );
+    }
+
+    if (opts.auto) {
+      try {
+        console.log(`Enabling auto-merge on ${prUrl}...`);
+        execFileSync(
+          'gh',
+          ['pr', 'merge', prUrl, '--auto', '--squash', '--delete-branch'],
+          {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'pipe'],
+          }
+        );
+        console.log(`Auto-merge enabled for ${prUrl}.`);
+      } catch (err) {
+        console.warn(
+          `Could not enable auto-merge: ${err.stderr || err.message}`
+        );
+      }
     }
   },
 
@@ -1341,21 +1662,7 @@ const commands = {
   },
 
   async overview() {
-    const parentDir = dirname(repoRoot);
-    const candidateDirs = [];
-    const knownNames = [
-      'FluentOverlay',
-      'Fluent-Studio-Website',
-      'FluentTimer',
-      'TokenHUD',
-      'Fluent-Studio-Atlas',
-      'AI-Dev-Workflow',
-    ];
-    for (const name of knownNames) {
-      const p = join(parentDir, name);
-      if (existsSync(p) && !candidateDirs.includes(p)) candidateDirs.push(p);
-    }
-    if (!candidateDirs.includes(repoRoot)) candidateDirs.push(repoRoot);
+    const candidateDirs = getKnownRepoDirs();
 
     const rows = [];
     for (const dir of candidateDirs) {
@@ -1609,21 +1916,7 @@ const commands = {
     if (!cmd) {
       fail('usage: node scripts/ticket.mjs exec "<shell-command>"');
     }
-    const parentDir = dirname(repoRoot);
-    const candidateDirs = [];
-    const knownNames = [
-      'FluentOverlay',
-      'Fluent-Studio-Website',
-      'FluentTimer',
-      'TokenHUD',
-      'Fluent-Studio-Atlas',
-      'AI-Dev-Workflow',
-    ];
-    for (const name of knownNames) {
-      const p = join(parentDir, name);
-      if (existsSync(p) && !candidateDirs.includes(p)) candidateDirs.push(p);
-    }
-    if (!candidateDirs.includes(repoRoot)) candidateDirs.push(repoRoot);
+    const candidateDirs = getKnownRepoDirs();
 
     console.log(
       `Running across ${candidateDirs.length} repositories: "${cmd}"\n`
@@ -1676,6 +1969,417 @@ const commands = {
           r.message.padEnd(colWidths.message),
         ].join('  ')
       );
+    }
+  },
+
+  async wt() {
+    const sub = opts.files[0] || 'list';
+    if (sub === 'list') {
+      const dirs = opts.fleet ? getKnownRepoDirs() : [repoRoot];
+      for (const dir of dirs) {
+        const repoName = basename(dir);
+        let out = '';
+        try {
+          out = execFileSync('git', ['-C', dir, 'worktree', 'list'], {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore'],
+          }).trim();
+        } catch {
+          continue;
+        }
+        if (opts.fleet) console.log(`=== ${repoName} ===`);
+        console.log(out || '(no worktrees)');
+        if (opts.fleet) console.log('');
+      }
+      return;
+    }
+
+    if (sub === 'new') {
+      const planArg = opts.files.slice(1).find((f) => f.endsWith('.plan.md'));
+      let plan = null;
+      try {
+        plan = planArg ? readPlan(planArg) : resolveActivePlan();
+      } catch {}
+
+      const branch =
+        opts.branch ||
+        (plan && plan.meta.branch ? plan.meta.branch : null) ||
+        (opts.name ? `feat/${opts.name}` : null);
+      if (!branch) {
+        fail(
+          'usage: node scripts/ticket.mjs wt new [<plan>] [--name <dir>] [--branch <branch>]'
+        );
+      }
+
+      const name =
+        opts.name ||
+        branch.replace(/^[^/]+\//, '').replace(/[^a-zA-Z0-9_-]+/g, '-');
+      const targetDir = resolve(repoRoot, '.worktrees', name);
+      mkdirSync(resolve(repoRoot, '.worktrees'), { recursive: true });
+
+      if (existsSync(targetDir)) {
+        fail(`target worktree directory already exists: ${targetDir}`);
+      }
+
+      const branchExists = !!git(['rev-parse', '--verify', branch], {
+        allowFail: true,
+      });
+      const addArgs = ['worktree', 'add'];
+      if (!branchExists) addArgs.push('-b', branch);
+      addArgs.push(targetDir);
+      if (branchExists) addArgs.push(branch);
+
+      try {
+        execFileSync('git', addArgs, {
+          cwd: repoRoot,
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'pipe'],
+        });
+      } catch (err) {
+        fail(`git worktree add failed: ${err.stderr || err.message}`);
+      }
+
+      const envPath = join(repoRoot, '.env');
+      if (existsSync(envPath)) {
+        try {
+          writeFileSync(join(targetDir, '.env'), readFileSync(envPath));
+        } catch {}
+      }
+
+      if (plan) {
+        plan.meta.worktree = name;
+        plan.meta.branch = branch;
+        writePlan(plan);
+      }
+
+      console.log(`Created worktree at .worktrees/${name} (branch: ${branch})`);
+      console.log(`To switch: cd .worktrees/${name}`);
+      return;
+    }
+
+    if (sub === 'prune') {
+      const dirs = opts.fleet ? getKnownRepoDirs() : [repoRoot];
+      let totalPruned = 0;
+
+      for (const dir of dirs) {
+        const repoName = basename(dir);
+        let listOut = '';
+        try {
+          listOut = execFileSync(
+            'git',
+            ['-C', dir, 'worktree', 'list', '--porcelain'],
+            { encoding: 'utf8', stdio: ['pipe', 'pipe', 'ignore'] }
+          );
+        } catch {
+          continue;
+        }
+
+        const entries = [];
+        let cur = {};
+        for (const line of listOut.split('\n')) {
+          const l = line.trim();
+          if (!l) {
+            if (cur.worktree) entries.push(cur);
+            cur = {};
+          } else if (l.startsWith('worktree ')) cur.worktree = l.slice(9);
+          else if (l.startsWith('HEAD ')) cur.head = l.slice(5);
+          else if (l.startsWith('branch '))
+            cur.branch = l.slice(7).replace('refs/heads/', '');
+        }
+        if (cur.worktree) entries.push(cur);
+
+        const nonMain = entries.slice(1);
+        if (!nonMain.length) continue;
+
+        for (const entry of nonMain) {
+          const wtPath = resolve(entry.worktree);
+          let isMerged = false;
+          if (entry.head) {
+            try {
+              execFileSync(
+                'git',
+                ['-C', dir, 'merge-base', '--is-ancestor', entry.head, 'HEAD'],
+                { stdio: 'ignore' }
+              );
+              isMerged = true;
+            } catch {}
+          }
+
+          if (isMerged || opts.all || !existsSync(wtPath)) {
+            if (opts.dryRun) {
+              console.log(
+                `[dry-run] Would prune worktree in ${repoName}: ${wtPath} (branch: ${entry.branch || 'detached'})`
+              );
+              totalPruned++;
+              continue;
+            }
+
+            let removed = false;
+            try {
+              execFileSync(
+                'git',
+                ['-C', dir, 'worktree', 'remove', wtPath, '--force'],
+                { stdio: 'ignore' }
+              );
+              removed = true;
+            } catch {}
+
+            if (existsSync(wtPath)) {
+              try {
+                const extended =
+                  process.platform === 'win32' && !wtPath.startsWith('\\\\?\\')
+                    ? `\\\\?\\${wtPath.replace(/\//g, '\\')}`
+                    : wtPath;
+                rmSync(extended, { recursive: true, force: true });
+                removed = true;
+              } catch {}
+            }
+
+            try {
+              execFileSync('git', ['-C', dir, 'worktree', 'prune'], {
+                stdio: 'ignore',
+              });
+            } catch {}
+
+            if (removed) {
+              console.log(
+                `Pruned worktree in ${repoName}: ${entry.branch || basename(wtPath)}`
+              );
+              totalPruned++;
+            }
+          }
+        }
+      }
+      console.log(`Prune complete: ${totalPruned} worktree(s) pruned.`);
+      return;
+    }
+
+    fail('usage: node scripts/ticket.mjs wt [list|new|prune] [--fleet] [--all]');
+  },
+
+  async recall() {
+    const query = (opts.files.join(' ') || opts.query || '').trim();
+    if (!query) {
+      fail('usage: node scripts/ticket.mjs recall "<keyword>" [--fleet]');
+    }
+    const qLower = query.toLowerCase();
+    const dirs = opts.fleet ? getKnownRepoDirs() : [repoRoot];
+
+    const results = [];
+    for (const dir of dirs) {
+      const repoName = basename(dir);
+      const searchDirs = [
+        join(dir, 'docs', 'decisions'),
+        join(dir, 'docs', 'plans'),
+        join(dir, 'docs', 'plans', 'archive'),
+      ];
+
+      function scanRecursive(d) {
+        if (!existsSync(d)) return [];
+        let files = [];
+        for (const entry of readdirSync(d, { withFileTypes: true })) {
+          const full = join(d, entry.name);
+          if (entry.isDirectory()) files.push(...scanRecursive(full));
+          else if (entry.name.endsWith('.md')) files.push(full);
+        }
+        return files;
+      }
+
+      const files = searchDirs.flatMap(scanRecursive);
+      for (const f of files) {
+        try {
+          const content = readFileSync(f, 'utf8');
+          if (!content.toLowerCase().includes(qLower)) continue;
+
+          const lines = content.split('\n');
+          const relPath = relative(dir, f).replace(/\\/g, '/');
+          const isAdr = relPath.startsWith('docs/decisions/');
+          const titleLine = lines.find((l) => /^#\s+/.test(l)) || '';
+          const title = titleLine.replace(/^#\s+/, '').trim() || basename(f);
+
+          const matches = [];
+          for (let i = 0; i < lines.length; i++) {
+            if (lines[i].toLowerCase().includes(qLower)) {
+              matches.push({ line: i + 1, text: lines[i].trim() });
+              if (matches.length >= 3) break;
+            }
+          }
+
+          results.push({
+            repo: repoName,
+            type: isAdr ? 'ADR' : 'Plan',
+            file: relPath,
+            title,
+            matches,
+          });
+        } catch {}
+      }
+    }
+
+    if (!results.length) {
+      return console.log(`No records found matching "${query}".`);
+    }
+
+    console.log(
+      `=== Recall: "${query}" (${results.length} match${results.length === 1 ? '' : 'es'}) ===\n`
+    );
+    for (const r of results) {
+      console.log(
+        `[${r.type}] ${opts.fleet ? `${r.repo} / ` : ''}${r.file} — ${r.title}`
+      );
+      for (const m of r.matches) {
+        console.log(`  L${m.line}: ${m.text.slice(0, 100)}`);
+      }
+      console.log('');
+    }
+  },
+
+  async archive() {
+    const plansDir = join(repoRoot, config.plansDir || 'docs/plans');
+    const plans = opts.files[0]
+      ? [readPlan(opts.files[0])]
+      : opts.all
+        ? allPlans()
+        : [resolveActivePlan()];
+
+    let count = 0;
+    for (const plan of plans) {
+      const isDone =
+        plan.meta.status === 'done' ||
+        plan.meta.status === 'shipped' ||
+        problems(plan, { requireTicket: false, ignoreReview: true }).length ===
+          0;
+
+      if (!isDone && !opts.force) {
+        console.warn(
+          `Skipping ${plan.rel}: plan has open items or is not marked done/shipped (use --force to archive anyway).`
+        );
+        continue;
+      }
+
+      const month =
+        plan.meta.completedAt?.slice(0, 7) || today().slice(0, 7);
+      const archiveDir = join(plansDir, 'archive', month);
+      mkdirSync(archiveDir, { recursive: true });
+
+      const destFile = join(archiveDir, basename(plan.full));
+      const relDest = relative(repoRoot, destFile).replace(/\\/g, '/');
+
+      let moved = false;
+      try {
+        git(['mv', plan.rel, relDest]);
+        moved = true;
+      } catch {
+        try {
+          renameSync(plan.full, destFile);
+          moved = true;
+        } catch (e) {
+          console.error(`Failed to move ${plan.rel}: ${e.message}`);
+        }
+      }
+
+      if (moved) {
+        console.log(`Archived: ${plan.rel} -> ${relDest}`);
+        count++;
+      }
+    }
+    console.log(`Archived ${count} plan(s).`);
+  },
+
+  async doctor() {
+    const dirs = opts.fleet ? getKnownRepoDirs() : [repoRoot];
+    console.log(
+      `=== AI-Dev-Workflow Doctor (${dirs.length} repo${dirs.length === 1 ? '' : 's'}) ===\n`
+    );
+
+    for (const dir of dirs) {
+      const name = basename(dir);
+      const isGit = existsSync(join(dir, '.git'));
+      if (!isGit) {
+        console.log(`[${name}] NOT A GIT REPOSITORY\n`);
+        continue;
+      }
+
+      const cfgPath = join(dir, 'scripts', 'ticket.config.json');
+      const hasCfg = existsSync(cfgPath);
+      let repoCfg = {};
+      if (hasCfg) {
+        try {
+          repoCfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+        } catch {}
+      }
+
+      let branch = '(unknown)';
+      try {
+        branch = execFileSync(
+          'git',
+          ['-C', dir, 'rev-parse', '--abbrev-ref', 'HEAD'],
+          {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore'],
+          }
+        ).trim();
+      } catch {}
+
+      let statusShort = '';
+      try {
+        statusShort = execFileSync('git', ['-C', dir, 'status', '--short'], {
+          encoding: 'utf8',
+          stdio: ['pipe', 'pipe', 'ignore'],
+        }).trim();
+      } catch {}
+      const dirty = statusShort.split('\n').filter(Boolean).length;
+
+      let wtCount = 1;
+      try {
+        const wtOut = execFileSync(
+          'git',
+          ['-C', dir, 'worktree', 'list', '--porcelain'],
+          {
+            encoding: 'utf8',
+            stdio: ['pipe', 'pipe', 'ignore'],
+          }
+        );
+        wtCount = (wtOut.match(/^worktree /gm) || []).length;
+      } catch {}
+
+      const hookPath = join(dir, '.git', 'hooks', 'pre-push');
+      const hasHook = existsSync(hookPath);
+
+      const tracker = repoCfg.tracker || 'notion';
+      const hasToken = !(
+        !process.env.NOTION_TOKEN && !readEnvToken(join(dir, '.env'))
+      );
+
+      let syncDrift = 'synced';
+      const ticketScript = join(dir, 'scripts', 'ticket.mjs');
+      const canonicalTicket = join(repoRoot, 'scripts', 'ticket.mjs');
+      if (
+        dir !== repoRoot &&
+        existsSync(ticketScript) &&
+        existsSync(canonicalTicket)
+      ) {
+        try {
+          const canonical = readFileSync(canonicalTicket, 'utf8');
+          const current = readFileSync(ticketScript, 'utf8');
+          if (canonical !== current) syncDrift = 'drift detected';
+        } catch {}
+      }
+
+      console.log(`Repo:      ${name} (${dir})`);
+      console.log(
+        `Branch:    ${branch} (${dirty === 0 ? 'clean' : `${dirty} uncommitted file(s)`})`
+      );
+      console.log(`Worktrees: ${wtCount}`);
+      console.log(
+        `Tracker:   ${tracker}${tracker === 'notion' ? ` (Token: ${hasToken ? 'present' : 'MISSING'})` : ' (offline mode)'}`
+      );
+      console.log(`Pre-push:  ${hasHook ? 'installed' : 'not installed'}`);
+      console.log(`Workflow:  ${syncDrift}`);
+      if (repoCfg.verifyCommand) {
+        console.log(`Verify:    ${repoCfg.verifyCommand}`);
+      }
+      console.log('---');
     }
   },
 };

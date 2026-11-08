@@ -31,6 +31,8 @@ $files = @(
   "scripts/ticket.mjs",
   "scripts/ticket.test.mjs",
   "scripts/sync.mjs",
+  "scripts/install.ps1",
+  "scripts/install.sh",
   "docs/plans/_template.plan.md",
   ".agents/skills/dev-workflow/SKILL.md",
   ".agents/skills/quick-review/SKILL.md",
