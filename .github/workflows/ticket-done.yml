@@ -2,15 +2,16 @@ name: Close ticket on merge
 
 # When a PR merges, set the Notion Task of each plan it changed to Done.
 # Needs the repository secret NOTION_TOKEN (Notion internal integration shared with the Tasks database);
-# without it (or in local tracker mode) the job logs a notice and exits cleanly.
+# local tracker mode derives completion from the protected branch.
 
 on:
   pull_request:
-    branches: [main]
+    branches: ["main"]
     types: [closed]
 
 permissions:
   contents: read
+  pull-requests: read
 
 jobs:
   close-ticket:
@@ -30,4 +31,14 @@ jobs:
       - name: Close tickets
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
-        run: node scripts/ticket.mjs ci-done --head ${{ github.event.pull_request.merge_commit_sha }}
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
+          MERGED_AT: ${{ github.event.pull_request.merged_at }}
+          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
+        run: |
+          pr_files="$RUNNER_TEMP/adw-pr-files.json"
+          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$pr_files"
+          node scripts/ticket.mjs ci-done --head "$MERGE_SHA" --pr-files "$pr_files" \
+            --pr "$PR_URL" --merged-at "$MERGED_AT" --changed-files "$CHANGED_FILES"

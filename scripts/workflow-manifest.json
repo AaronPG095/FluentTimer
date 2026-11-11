@@ -1,0 +1,40 @@
+{
+  "schemaVersion": 1,
+  "copy": [
+    "scripts/workflow-manifest.json",
+    "scripts/ticket.mjs",
+    "scripts/ticket.test.mjs",
+    "scripts/sync.mjs",
+    "scripts/sync-repos.ps1",
+    "scripts/install.ps1",
+    "scripts/install.sh",
+    "docs/plans/_template.plan.md",
+    ".agents/skills/quick-review/SKILL.md",
+    ".claude/skills/quick-review/SKILL.md",
+    ".agents/skills/agentic-workflow/SKILL.md",
+    ".claude/skills/agentic-workflow/SKILL.md",
+    ".github/pull_request_template.md",
+    ".github/workflows/workflow-sync.yml"
+  ],
+  "prefix": [
+    ".agents/skills/dev-workflow/SKILL.md",
+    ".claude/skills/dev-workflow/SKILL.md"
+  ],
+  "branches": [
+    ".github/workflows/plan-check.yml",
+    ".github/workflows/ticket-done.yml"
+  ],
+  "starterConfig": {
+    "tracker": "local",
+    "timeZone": "Europe/Berlin",
+    "plansDir": "docs/plans",
+    "protectedBranches": ["main"],
+    "captureSources": ["Claude", "Codex", "Gemini", "ChatGPT", "Notion AI", "Other"],
+    "verifyCommand": "npm test",
+    "requireReview": false,
+    "noPlan": {
+      "maxChangedLines": 40,
+      "noNewFilesUnder": ["src"]
+    }
+  }
+}
