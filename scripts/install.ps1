@@ -1,14 +1,4 @@
-<#
-.SYNOPSIS
-  One-line AI-Dev-Workflow installer and bootstrapper for any machine.
-.DESCRIPTION
-  Downloads the canonical, token-lean AI-Dev-Workflow engine files from GitHub
-  into the current repository, sets up starter configuration, and installs git safety hooks.
-.EXAMPLE
-  irm https://raw.githubusercontent.com/AaronPG095/AI-Dev-Workflow/main/scripts/install.ps1 | iex
-  # or with parameters:
-  & .\scripts\install.ps1 -Prefix MYP
-#>
+# AI-Dev-Workflow Installer. Delegate the managed bundle to the pinned sync engine.
 param(
   [string]$Prefix = "PROJ",
   [string]$Upstream = "AaronPG095/AI-Dev-Workflow",
@@ -16,84 +6,29 @@ param(
 )
 
 $ErrorActionPreference = "Stop"
-
-Write-Host "=================================================" -ForegroundColor Cyan
-Write-Host "   AI-Dev-Workflow Installer (Multi-Machine)     " -ForegroundColor Cyan
-Write-Host "=================================================" -ForegroundColor Cyan
-Write-Host "Target directory: $(Get-Location)"
-Write-Host "Project prefix:   $Prefix"
-Write-Host "Upstream source:  $Upstream ($Branch)"
-Write-Host ""
-
-$baseUrl = "https://raw.githubusercontent.com/$Upstream/$Branch"
-
-$files = @(
-  "scripts/ticket.mjs",
-  "scripts/ticket.test.mjs",
-  "scripts/sync.mjs",
-  "scripts/install.ps1",
-  "scripts/install.sh",
-  "docs/plans/_template.plan.md",
-  ".agents/skills/dev-workflow/SKILL.md",
-  ".agents/skills/quick-review/SKILL.md",
-  ".claude/skills/dev-workflow/SKILL.md",
-  ".claude/skills/quick-review/SKILL.md",
-  ".github/workflows/plan-check.yml",
-  ".github/workflows/ticket-done.yml",
-  ".github/workflows/workflow-sync.yml",
-  ".github/pull_request_template.md"
-)
-
-foreach ($file in $files) {
-  $dest = Join-Path (Get-Location) $file
-  $parent = Split-Path $dest -Parent
-  if (-not (Test-Path $parent)) {
-    New-Item -ItemType Directory -Path $parent -Force | Out-Null
-  }
-  $url = "$baseUrl/$file"
-  Write-Host "  -> Fetching $file..." -ForegroundColor Gray
-  try {
-    $content = (Invoke-RestMethod -Uri $url -Method Get -UseBasicParsing)
-    if ($file -like "*dev-workflow*") {
-      $content = $content.Replace("ADW-Plan-", "$Prefix-Plan-")
-    }
-    Set-Content -Path $dest -Value $content -NoNewline
-  } catch {
-    Write-Warning "Could not fetch $file: $_"
-  }
+if ($Upstream -notmatch '^[\w.-]+/[\w.-]+$') { throw "Upstream must be owner/repository" }
+$release = $Branch
+if ($release -notmatch '^[0-9a-f]{40}$') {
+  $ref = [uri]::EscapeDataString($Branch)
+  $release = (Invoke-RestMethod -Uri "https://api.github.com/repos/$Upstream/commits/$ref" -UseBasicParsing -TimeoutSec 30).sha
+  if ($release -notmatch '^[0-9a-f]{40}$') { throw "Invalid upstream SHA" }
 }
 
-$cfgPath = Join-Path (Get-Location) "scripts/ticket.config.json"
-if (-not (Test-Path $cfgPath)) {
-  $starterConfig = @"
-{
-  "prefix": "$Prefix",
-  "tracker": "local",
-  "timeZone": "Europe/Berlin",
-  "plansDir": "docs/plans",
-  "protectedBranches": ["main"],
-  "captureSources": ["Claude", "Codex", "Gemini", "ChatGPT", "Notion AI", "Other"],
-  "verifyCommand": "npm test",
-  "requireReview": false,
-  "noPlan": {
-    "maxChangedLines": 40,
-    "noNewFilesUnder": ["src"]
-  }
-}
-"@
-  Set-Content -Path $cfgPath -Value $starterConfig
-  Write-Host "  -> Created scripts/ticket.config.json (Prefix: $Prefix)" -ForegroundColor Green
+$bootstrap = Join-Path ([IO.Path]::GetTempPath()) ("adw-sync-" + [guid]::NewGuid().ToString("N") + ".mjs")
+try {
+  Invoke-WebRequest -Uri "https://raw.githubusercontent.com/$Upstream/$release/scripts/sync.mjs" -UseBasicParsing -TimeoutSec 30 -OutFile $bootstrap
+  & node $bootstrap --remote --upstream $Upstream --branch $release --init-prefix $Prefix
+  if ($LASTEXITCODE -ne 0) { throw "Workflow install failed with exit code $LASTEXITCODE" }
+} finally {
+  if (Test-Path -LiteralPath $bootstrap) { Remove-Item -LiteralPath $bootstrap }
 }
 
-if (Test-Path ".git") {
-  Write-Host "  -> Installing pre-push guardrail hook..." -ForegroundColor Gray
-  try {
-    node scripts/ticket.mjs hook install
-  } catch {
-    Write-Warning "Could not run hook installer: $_"
+if ((Get-Command git -ErrorAction SilentlyContinue) -and (Test-Path -LiteralPath ".git")) {
+  $hookPath = & git rev-parse --git-path hooks/pre-push
+  if ($LASTEXITCODE -ne 0) { throw "Unable to locate the Git pre-push hook" }
+  if (-not (Test-Path -LiteralPath $hookPath)) {
+    & node scripts/ticket.mjs hook install
+    if ($LASTEXITCODE -ne 0) { throw "Unable to install the Git pre-push hook" }
   }
 }
-
-Write-Host ""
-Write-Host "AI-Dev-Workflow successfully installed!" -ForegroundColor Green
-Write-Host "Start by creating a plan: node scripts/ticket.mjs new <Topic> [--branch]" -ForegroundColor Cyan
+Write-Host "AI-Dev-Workflow successfully installed."
