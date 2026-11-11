@@ -1,7 +1,7 @@
 ---
 title: Plan - Process: AI Dev Workflow rollout
 ticket: https://app.notion.com/p/FT-Plan-Process-AI-Dev-Workflow-rollout-4150b9c6786f815fa48ad418457ef020
-status: in-progress
+status: shipped
 devTicketKey: FT:FT-Plan-AI-Dev-Workflow-e58673fd9216-2026-11
 agent: Codex
 branch: codex/adw-rollout-e58673fd9216
@@ -9,6 +9,7 @@ worktree: FluentTimer
 reviewedBy: Codex
 reviewVerdict: pass
 reviewFingerprint: 191571ee97921bbe496983cb7db505688a257eaf8de78a0a1e1e738984b0b1a6
+pr: https://github.com/AaronPG095/FluentTimer/pull/9
 ---
 
 # Plan - Process: AI Dev Workflow rollout
