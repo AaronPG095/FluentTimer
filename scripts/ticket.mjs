@@ -114,7 +114,6 @@ const WORKFLOW_FILES = new Set([
   '.agents/skills/agentic-workflow/SKILL.md',
   '.claude/skills/agentic-workflow/SKILL.md',
   '.github/pull_request_template.md',
-  '.github/workflows/workflow-sync.yml',
   '.github/workflows/plan-check.yml',
   '.github/workflows/ticket-done.yml',
   'AGENTS.md',

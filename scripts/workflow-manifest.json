@@ -14,8 +14,7 @@
     ".claude/skills/quick-review/SKILL.md",
     ".agents/skills/agentic-workflow/SKILL.md",
     ".claude/skills/agentic-workflow/SKILL.md",
-    ".github/pull_request_template.md",
-    ".github/workflows/workflow-sync.yml"
+    ".github/pull_request_template.md"
   ],
   "prefix": [
     ".agents/skills/dev-workflow/SKILL.md",
