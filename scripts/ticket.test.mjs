@@ -1186,9 +1186,9 @@ test('new command with --summary, --criteria, --steps, and --create scaffolds an
       '--summary',
       '"Fast summary text"',
       '--criteria',
-      '"C1|C2"',
+      '"C1, with comma|C2"',
       '--steps',
-      '"S1|S2"',
+      '"S1, with comma|S2"',
       '--create',
       '--agent',
       'Gemini',
@@ -1208,8 +1208,8 @@ test('new command with --summary, --criteria, --steps, and --create scaffolds an
   assert.equal(existsSync(planPath), true);
   const content = readFileSync(planPath, 'utf8');
   assert.match(content, /Fast summary text/);
-  assert.match(content, /- \[ \] C1/);
-  assert.match(content, /- \[ \] S1/);
+  assert.match(content, /- \[ \] C1, with comma\r?\n- \[ \] C2/);
+  assert.match(content, /- \[ \] S1, with comma\r?\n- \[ \] S2/);
 });
 
 test('recall command searches across ADRs and plans', (t) => {

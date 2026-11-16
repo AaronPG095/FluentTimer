@@ -2647,7 +2647,7 @@ const commands = {
 
     const criteriaList = rawCriteria
       ? rawCriteria
-          .split(/[|,\n]/)
+          .split(/[|\n]/)
           .map((c) => c.trim())
           .filter(Boolean)
           .map((c) => `- [ ] ${c}`)
@@ -2657,7 +2657,7 @@ const commands = {
     const isRefactor = type.toLowerCase() === 'refactor';
     const stepsList = rawSteps
       ? rawSteps
-          .split(/[|,\n]/)
+          .split(/[|\n]/)
           .map((s) => s.trim())
           .filter(Boolean)
           .map((s) => `- [ ] ${s}`)

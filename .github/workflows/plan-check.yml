@@ -40,7 +40,7 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if git diff --name-only "$BASE_SHA" "$HEAD_SHA" -- scripts/ticket.mjs scripts/ticket.test.mjs | grep -q .; then
+          if ! git diff --quiet "$BASE_SHA"..."$HEAD_SHA" -- scripts/ticket.mjs scripts/ticket.test.mjs; then
             node --test scripts/ticket.test.mjs
           else
             echo "Skipping ticket.test.mjs (scripts/ticket.mjs and scripts/ticket.test.mjs unchanged)."
