@@ -40,5 +40,7 @@
   "agentic": {
     "maxRetries": 3,
     "verifyTier": "test"
-  }
+  },
+  "requireReview": true,
+  "allowSelfReview": false
 }

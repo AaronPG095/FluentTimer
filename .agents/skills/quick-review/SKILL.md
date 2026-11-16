@@ -35,10 +35,13 @@ Check the packet against `AGENTS.md` and the plan:
 
 ## 3. Record Verdict & Report Concisely
 
-Stamp the review into the plan (use an independent reviewer when `requireReview: true`, or pass `--self-review "<reason>"` if unavoidable; pass `--allow-test-drop "<reason>"` only if test removal was intentional):
+Stamp the review into the plan from an **independent reviewer** (a separate read-only sub-agent, fresh session, or second AI model; `requireReview` defaults to `true` and `--self-review` is blocked unless `allowSelfReview: true` is explicitly configured; pass `--allow-test-drop "<reason>"` only if test removal was intentional):
 
 ```powershell
+# Second AI client:
 node scripts/ticket.mjs review --agent <Claude|Codex|Gemini|Other> --verdict <pass|warn|block> --summary "<1-line summary of verdict and any findings>"
+# Same-provider independent sub-agent / fresh session:
+node scripts/ticket.mjs review --agent <Claude|Codex|Gemini|Other> --reviewer-id <subagent-conversation-or-session-id> --verdict <pass|warn|block> --summary "<1-line summary>"
 ```
 
 - `pass`: No blocking issues; ready for `ticket.mjs check` and `ship`.

@@ -179,6 +179,11 @@ function fail(message) {
   process.exit(1);
 }
 
+const isRequireReview = (cfg = config) => cfg.requireReview !== false;
+const isAllowSelfReview = (cfg = config) => cfg.allowSelfReview === true;
+const hasIndependentReviewSession = (meta) =>
+  Boolean((meta?.reviewSession || '').trim().length >= 4);
+
 function getVerifyTiers(cfg = config) {
   if (
     cfg.verify &&
@@ -408,31 +413,40 @@ function problems(plan, { requireTicket = true, ignoreReview = false, base, head
       );
   }
   if (!ignoreReview) {
+    const reqReview = isRequireReview(config);
     const verdict = (plan.meta.reviewVerdict || '').toLowerCase();
     if (verdict === 'block')
       found.push(
         'review verdict is block (resolve findings and re-run review)',
       );
-    else if (config.requireReview && !['pass', 'warn'].includes(verdict)) {
+    else if (reqReview && !['pass', 'warn'].includes(verdict)) {
       found.push(
-        `no passing review recorded (run: node scripts/ticket.mjs pack ${plan.rel}, then node scripts/ticket.mjs review ${plan.rel} --agent <client> --verdict pass --summary "<findings>")`,
+        `no passing review recorded (run: node scripts/ticket.mjs pack ${plan.rel}, then node scripts/ticket.mjs review ${plan.rel} --agent <client> --reviewer-id <subagent-id> --verdict pass --summary "<findings>")`,
       );
-    } else if (['pass', 'warn'].includes(verdict) &&
-      (config.requireReview || plan.meta.reviewFingerprint) &&
-      plan.meta.reviewFingerprint !== reviewFingerprint(plan, base, head, dir)) {
+    } else if (
+      ['pass', 'warn'].includes(verdict) &&
+      (reqReview || plan.meta.reviewFingerprint) &&
+      plan.meta.reviewFingerprint !== reviewFingerprint(plan, base, head, dir)
+    ) {
       found.push('review does not cover this change; run pack and review again');
     }
     if (
-      config.requireReview &&
+      reqReview &&
       ['pass', 'warn'].includes(verdict) &&
       plan.meta.agent &&
       plan.meta.reviewedBy &&
       plan.meta.agent.toLowerCase() === plan.meta.reviewedBy.toLowerCase() &&
-      !(plan.meta.reviewSelfReason || '').trim()
+      !hasIndependentReviewSession(plan.meta)
     ) {
-      found.push(
-        `self-review blocked (reviewedBy matches agent "${plan.meta.agent}"); run review with a different agent or pass --self-review "<reason>"`,
-      );
+      if (!isAllowSelfReview(config)) {
+        found.push(
+          `self-review blocked (reviewedBy matches agent "${plan.meta.agent}" without reviewSession); independent sub-agent (--reviewer-id <subagent-id>) or second-model review is required`,
+        );
+      } else if (!(plan.meta.reviewSelfReason || '').trim()) {
+        found.push(
+          `self-review blocked (reviewedBy matches agent "${plan.meta.agent}"); run review with a different agent, pass --reviewer-id <subagent-id>, or pass --self-review "<reason>"`,
+        );
+      }
     }
   }
   return found;
@@ -3821,7 +3835,7 @@ const commands = {
         '4. Code Quality & Standards: Does the change conform to repository standards with clean hygiene?',
         '',
         '## Verdict Stamp Instructions',
-        `Run: node scripts/ticket.mjs review ${plan.rel} --agent <you> --verdict <pass|warn|block> --summary "<concise findings>"`,
+        `Run: node scripts/ticket.mjs review ${plan.rel} --agent <you> [--reviewer-id <subagent-id>] --verdict <pass|warn|block> --summary "<concise findings>"`,
         'Or dual-pass: --standards <pass|warn|block> --spec <pass|warn|block>',
       );
 
@@ -3871,17 +3885,31 @@ const commands = {
       );
 
     const selfReviewReason = (opts.selfReview || '').replace(/\s+/g, ' ').trim();
+    const reviewerId = (opts.reviewerId || opts.subagent || '').replace(/\s+/g, ' ').trim();
     const allowTestDropReason = (opts.allowTestDrop || '').replace(/\s+/g, ' ').trim();
+    if ((opts.reviewerId !== undefined || opts.subagent !== undefined) && reviewerId.length < 4) {
+      fail(
+        '--reviewer-id must be at least 4 characters identifying the independent sub-agent or fresh session',
+      );
+    }
+    if (selfReviewReason && !isAllowSelfReview(config) && !opts.force) {
+      fail(
+        `cannot stamp review verdict "${verdict}": --self-review is disabled unless allowSelfReview: true is configured. Spawn an independent reviewer sub-agent (--reviewer-id <id>) or use a second model.`,
+      );
+    }
     if (
-      config.requireReview &&
+      isRequireReview(config) &&
       verdict !== 'block' &&
       !opts.force &&
       plan.meta.agent &&
       plan.meta.agent.toLowerCase() === agent.toLowerCase() &&
-      !selfReviewReason
+      !reviewerId &&
+      !(isAllowSelfReview(config) && selfReviewReason)
     ) {
       fail(
-        `cannot stamp review verdict "${verdict}": self-review blocked (reviewedBy "${agent}" matches plan agent "${plan.meta.agent}"). Use an independent reviewer or pass --self-review "<reason>".`,
+        isAllowSelfReview(config)
+          ? `cannot stamp review verdict "${verdict}": self-review blocked (reviewedBy "${agent}" matches plan agent "${plan.meta.agent}"). Use an independent reviewer (--reviewer-id <id> or second model) or pass --self-review "<reason>".`
+          : `cannot stamp review verdict "${verdict}": self-review blocked (reviewedBy "${agent}" matches plan agent "${plan.meta.agent}"). Independent sub-agent (--reviewer-id <id>) or second-model review is required.`,
       );
     }
 
@@ -3920,7 +3948,12 @@ const commands = {
     const stamp = new Date().toISOString().slice(0, 16).replace('T', ' ');
     plan.meta.reviewedBy = agent;
     plan.meta.reviewVerdict = verdict;
-    if (selfReviewReason && verdict !== 'block') {
+    if (reviewerId && verdict !== 'block') {
+      plan.meta.reviewSession = reviewerId;
+    } else {
+      delete plan.meta.reviewSession;
+    }
+    if (selfReviewReason && verdict !== 'block' && !reviewerId) {
       plan.meta.reviewSelfReason = selfReviewReason;
     } else {
       delete plan.meta.reviewSelfReason;
@@ -3938,7 +3971,8 @@ const commands = {
       plan.meta.reviewFingerprint = reviewFingerprint(plan);
     }
     const extraTags = [
-      selfReviewReason && verdict !== 'block' ? ` [self-review: ${selfReviewReason}]` : '',
+      reviewerId && verdict !== 'block' ? ` [reviewer: ${reviewerId}]` : '',
+      selfReviewReason && verdict !== 'block' && !reviewerId ? ` [self-review: ${selfReviewReason}]` : '',
       allowTestDropReason && verdict === 'pass' ? ` [test-drop: ${allowTestDropReason}]` : '',
     ].join('');
     plan.body = appendToSection(
@@ -5020,6 +5054,9 @@ const commands = {
       );
       console.log(`Pre-push:  ${hasHook ? 'installed' : 'not installed'}`);
       console.log(`Workflow:  ${syncDrift}`);
+      console.log(
+        `Review:    ${isRequireReview(repoCfg) ? (isAllowSelfReview(repoCfg) ? 'required (self-review override allowed)' : 'required (independent sub-agent / second model; self-review blocked)') : 'DISABLED (requireReview: false)'}`,
+      );
       const inv = runInvariants(repoCfg, dir);
       console.log(
         `Invariants:${inv.total ? (inv.passed ? ` ${inv.total}/${inv.total} passed` : ` FAILED (${inv.failures[0]})`) : ' none configured'}`,

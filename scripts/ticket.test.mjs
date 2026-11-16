@@ -36,6 +36,7 @@ const defaultNotionConfig = {
     'Other',
   ],
   verifyCommand: 'npm test',
+  requireReview: false,
   noPlan: {
     maxChangedLines: 40,
     noNewFilesUnder: ['src'],
@@ -2570,7 +2571,7 @@ test('ci-check allows verified upstream workflow sync under no-plan and rejects 
   assert.match(mixedRes.stderr, /no workflow policy changes/);
 });
 
-test('T1.1: requireReview blocks self-review unless --self-review is recorded', (t) => {
+test('T1.1: requireReview enforces independent subagent or second-model review and gates --self-review behind allowSelfReview', (t) => {
   const f = fixture(t, 'agent: Gemini\n', [], {
     tracker: 'local',
     requireReview: true,
@@ -2586,7 +2587,7 @@ test('T1.1: requireReview blocks self-review unless --self-review is recorded', 
   f.git('add', '.');
   f.git('commit', '-m', 'ticketed');
 
-  // Same agent without --self-review is blocked
+  // Same agent without --reviewer-id is blocked
   const selfBlocked = f.run('review', [
     '--agent',
     'Gemini',
@@ -2598,7 +2599,66 @@ test('T1.1: requireReview blocks self-review unless --self-review is recorded', 
   assert.notEqual(selfBlocked.status, 0);
   assert.match(selfBlocked.stderr, /self-review blocked/);
 
-  // Same agent with --self-review succeeds and passes check
+  // Same agent with --self-review is also blocked when allowSelfReview is false/unset
+  const selfReasonBlocked = f.run('review', [
+    '--agent',
+    'Gemini',
+    '--verdict',
+    'pass',
+    '--summary',
+    'solo attempt',
+    '--self-review',
+    'no second model available',
+  ]);
+  assert.notEqual(selfReasonBlocked.status, 0);
+  assert.match(selfReasonBlocked.stderr, /--self-review is disabled/);
+
+  // Short --subagent / --reviewer-id (<4 chars) is rejected
+  const shortSubagentBlocked = f.run('review', [
+    '--agent',
+    'Gemini',
+    '--subagent',
+    'abc',
+    '--verdict',
+    'pass',
+    '--summary',
+    'short id',
+  ]);
+  assert.notEqual(shortSubagentBlocked.status, 0);
+  assert.match(shortSubagentBlocked.stderr, /at least 4 characters/);
+
+  // Same agent with independent subagent --reviewer-id succeeds and passes check
+  const subagentRes = f.run('review', [
+    '--agent',
+    'Gemini',
+    '--reviewer-id',
+    'subagent-61f13605',
+    '--verdict',
+    'pass',
+    '--summary',
+    'independent subagent pass',
+  ]);
+  assert.equal(subagentRes.status, 0, subagentRes.stderr);
+  assert.match(readFileSync(f.plan, 'utf8'), /reviewSession: subagent-61f13605/);
+  assert.match(readFileSync(f.plan, 'utf8'), /\[reviewer: subagent-61f13605\]/);
+  const checkSub = f.run('check');
+  assert.equal(checkSub.status, 0, checkSub.stderr);
+
+  // Tampering reviewSession out of frontmatter causes check to fail
+  const planPath = f.plan;
+  writeFileSync(
+    planPath,
+    readFileSync(planPath, 'utf8').replace(/^reviewSession:.*\r?\n/m, ''),
+  );
+  const checkSubTampered = f.run('check');
+  assert.notEqual(checkSubTampered.status, 0);
+  assert.match(checkSubTampered.stderr, /self-review blocked/);
+
+  // Enabling allowSelfReview allows --self-review override and detects tampering
+  const cfgPath = join(f.root, 'scripts/ticket.config.json');
+  const prevCfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  writeFileSync(cfgPath, JSON.stringify({ ...prevCfg, allowSelfReview: true }, null, 2));
+
   const selfAllowed = f.run('review', [
     '--agent',
     'Gemini',
@@ -2615,8 +2675,6 @@ test('T1.1: requireReview blocks self-review unless --self-review is recorded', 
   const checkSelf = f.run('check');
   assert.equal(checkSelf.status, 0, checkSelf.stderr);
 
-  // Tampering reviewSelfReason out of frontmatter causes check to fail
-  const planPath = f.plan;
   writeFileSync(
     planPath,
     readFileSync(planPath, 'utf8').replace(/^reviewSelfReason:.*\r?\n/m, ''),
@@ -2625,7 +2683,7 @@ test('T1.1: requireReview blocks self-review unless --self-review is recorded', 
   assert.notEqual(checkTampered.status, 0);
   assert.match(checkTampered.stderr, /self-review blocked/);
 
-  // Independent reviewer clears reviewSelfReason and passes check
+  // Different AI client clears reviewSelfReason and passes check without --reviewer-id
   const indepRes = f.run('review', [
     '--agent',
     'Codex',
@@ -3737,4 +3795,49 @@ test('T3.3: release init, status, notes (--write), closeout, and prime/resume/pa
   assert.equal(statsRes.status, 0, statsRes.stderr);
   const statsJson = JSON.parse(statsRes.stdout);
   assert.equal(statsJson.byVersion['1.2.0'], 3);
+});
+
+test('T3.4: omitted requireReview defaults to true, enforces independent review, and doctor reports status', (t) => {
+  const f = fixture(t, 'agent: Gemini\n', [], { tracker: 'local' });
+  const cfgPath = join(f.root, 'scripts/ticket.config.json');
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  delete cfg.requireReview;
+  delete cfg.allowSelfReview;
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+  f.git('init', '-b', 'main');
+  f.git('config', 'user.name', 'Test');
+  f.git('config', 'user.email', 'test@example.invalid');
+  f.git('add', '.');
+  f.git('commit', '-m', 'init');
+  f.git('checkout', '-b', 'feat/default-review');
+
+  const createRes = f.run('create', ['--agent', 'Gemini']);
+  assert.equal(createRes.status, 0, createRes.stderr);
+  f.git('add', '.');
+  f.git('commit', '-m', 'ticketed');
+
+  // Check fails without review even though requireReview was omitted from config
+  const unreviewedCheck = f.run('check');
+  assert.notEqual(unreviewedCheck.status, 0);
+  assert.match(unreviewedCheck.stderr, /no passing review recorded/);
+
+  // Doctor explicitly reports mandatory independent review
+  const docRes = f.run('doctor', [], [], { omitPlan: true });
+  assert.equal(docRes.status, 0, docRes.stderr);
+  assert.match(docRes.stdout, /Review:\s+required \(independent sub-agent \/ second model; self-review blocked\)/);
+
+  // Independent subagent review with --reviewer-id unblocks check and ci-check
+  const revRes = f.run('review', [
+    '--agent',
+    'Gemini',
+    '--reviewer-id',
+    'subagent-9999',
+    '--verdict',
+    'pass',
+    '--summary',
+    'independent subagent check passed',
+  ]);
+  assert.equal(revRes.status, 0, revRes.stderr);
+  assert.equal(f.run('check').status, 0);
 });

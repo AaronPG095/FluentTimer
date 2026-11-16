@@ -43,7 +43,8 @@
       "maxRetries": 3,
       "verifyTier": "test"
     },
-    "requireReview": false,
+    "requireReview": true,
+    "allowSelfReview": false,
     "invariants": {
       "mirrorDirs": [[".agents/skills", ".claude/skills"]]
     },
