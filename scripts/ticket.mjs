@@ -10,7 +10,9 @@
 //   node scripts/ticket.mjs check  [<plan>]                                       fails while any checkbox is open, a ticked criterion has no
 //                                                                                 "verified:" evidence, or review verdict is "block"
 //   node scripts/ticket.mjs ship   [<plan>] --pr <url>                            check, link PR on the Task, add a comment
+//   node scripts/ticket.mjs merge  [<plan>] [--squash|--merge|--rebase]            merge PR via gh and close Task locally
 //   node scripts/ticket.mjs done   [<plan>]                                       Task -> Done (normally run by CI on merge)
+//   node scripts/ticket.mjs verify [--tier fast|test|full] [--all] [--pre-push]    run configured verification command(s)
 //   node scripts/ticket.mjs ci-check --base <sha> --head <sha>                    CI: changed plans must pass check and keep every
 //                                                                                 checkbox; "no-plan" PRs must stay small
 //   node scripts/ticket.mjs ci-done  --head <merge sha> --pr-files <file>         CI: set merged plans' Tasks to Done
@@ -154,6 +156,11 @@ const BOOLEAN_FLAGS = new Set([
   '--lessons',
   '--agent-hooks',
   '--write',
+  '--pre-push',
+  '--squash',
+  '--merge',
+  '--rebase',
+  '--keep-branch',
 ]);
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
@@ -210,6 +217,12 @@ function resolveVerifyCommand(cfg = config, tier = 'test') {
     return { tier: keys[0], cmd: tiers[keys[0]] };
   }
   return null;
+}
+
+function resolvePrePushVerifyTier(cfg = config) {
+  if (!cfg.prePushVerify) return '';
+  if (typeof cfg.prePushVerify === 'string') return cfg.prePushVerify.trim();
+  return cfg.prePushVerify === true ? 'test' : '';
 }
 
 function artifactPatterns(cfg = config) {
@@ -4164,6 +4177,70 @@ const commands = {
     console.log(`Ticket set to Done: ${plan.meta.ticket}`);
   },
 
+  async merge() {
+    const plan = onePlan();
+    const found = problems(plan);
+    if (found.length) fail(`${plan.rel} is not closed out:\n- ${found.join('\n- ')}`);
+
+    const modes = [
+      opts.squash && '--squash',
+      opts.merge && '--merge',
+      opts.rebase && '--rebase',
+    ].filter(Boolean);
+    if (modes.length > 1) fail(`choose at most one merge strategy (${modes.join(', ')})`);
+    const strategyFlag = modes[0] || '--squash';
+
+    let prTarget = /^https:\/\//.test(plan.meta.pr || '') ? plan.meta.pr : '';
+    if (!prTarget) {
+      const branch = git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true });
+      if (!branch || branch === 'HEAD')
+        fail('merge needs a plan with a "pr:" URL or an active feature branch');
+      const candidates = JSON.parse(
+        prCommand(
+          'gh',
+          ['pr', 'list', '--state', 'all', '--head', branch, '--json', 'url,state,isCrossRepository'],
+          'could not look up pull request',
+        ),
+      ).filter((p) => !p.isCrossRepository);
+      const match =
+        candidates.find((p) => p.state === 'OPEN') ||
+        candidates.find((p) => p.state === 'MERGED') ||
+        candidates[0];
+      if (!match?.url)
+        fail(`no pull request found for ${plan.rel}; run "node scripts/ticket.mjs pr" first`);
+      prTarget = match.url;
+    }
+
+    const prInfo = JSON.parse(
+      prCommand('gh', ['pr', 'view', prTarget, '--json', 'url,state,headRefName'], 'could not inspect pull request'),
+    );
+    const prUrl = prInfo.url || prTarget;
+    const mergeArgs = ['pr', 'merge', prUrl, strategyFlag];
+    if (!opts.keepBranch) mergeArgs.push('--delete-branch');
+
+    if (opts.dryRun) {
+      console.log(`Dry run: gh ${mergeArgs.join(' ')} (state: ${prInfo.state || 'UNKNOWN'})`);
+      if (hasTicket(plan.meta.ticket)) {
+        console.log(`Dry run: close ticket ${plan.meta.ticket}`);
+      }
+      return;
+    }
+
+    if (prInfo.state === 'MERGED') {
+      console.log(`Pull request already merged: ${prUrl}`);
+    } else if (prInfo.state === 'CLOSED') {
+      fail(`pull request ${prUrl} was closed without merging`);
+    } else {
+      prCommand('gh', mergeArgs, 'could not merge pull request');
+      console.log(`Merged pull request: ${prUrl}`);
+    }
+
+    if (hasTicket(plan.meta.ticket)) {
+      await closeTicket(plan.meta.ticket);
+      console.log(`Ticket set to Done: ${plan.meta.ticket}`);
+    }
+  },
+
   async 'ci-check'() {
     if (!opts.base || !opts.head)
       fail('usage: ci-check --base <sha> --head <sha>');
@@ -4579,7 +4656,11 @@ const commands = {
         '  fi',
         'fi',
         '',
+        'has_non_delete=0',
         'while read -r local_ref local_oid remote_ref remote_oid; do',
+        '  if [ "$local_oid" != "0000000000000000000000000000000000000000" ]; then',
+        '    has_non_delete=1',
+        '  fi',
         '  branch=$(echo "$remote_ref" | sed \'s@^refs/heads/@@\')',
         '  for pb in $protected_branches; do',
         '    if [ "$branch" = "$pb" ]; then',
@@ -4599,6 +4680,13 @@ const commands = {
         '  node scripts/ticket.mjs check >/dev/null 2>&1',
         '  if [ $? -ne 0 ]; then',
         '    echo "Note: Active plan check did not pass yet. CI will enforce plan completion on PR."',
+        '  fi',
+        '  if [ "$has_non_delete" = "1" ]; then',
+        '    node scripts/ticket.mjs verify --pre-push',
+        '    rc=$?',
+        '    if [ $rc -ne 0 ]; then',
+        '      exit $rc',
+        '    fi',
         '  fi',
         'fi',
         '',
@@ -5052,7 +5140,10 @@ const commands = {
       console.log(
         `Tracker:   ${tracker}${tracker === 'notion' ? ` (Token: ${hasToken ? 'present' : 'MISSING'})` : ' (offline mode)'}`,
       );
-      console.log(`Pre-push:  ${hasHook ? 'installed' : 'not installed'}`);
+      const prePushTier = resolvePrePushVerifyTier(repoCfg);
+      console.log(
+        `Pre-push:  ${hasHook ? `installed${prePushTier ? ` (prePushVerify: ${prePushTier})` : ''}` : 'not installed'}`,
+      );
       console.log(`Workflow:  ${syncDrift}`);
       console.log(
         `Review:    ${isRequireReview(repoCfg) ? (isAllowSelfReview(repoCfg) ? 'required (self-review override allowed)' : 'required (independent sub-agent / second model; self-review blocked)') : 'DISABLED (requireReview: false)'}`,
@@ -5083,9 +5174,23 @@ const commands = {
   },
 
   async verify() {
+    if (opts.prePush) {
+      if (process.env.GIT_SKIP_PREPUSH_VERIFY === '1') {
+        console.log('Pre-push verify skipped (GIT_SKIP_PREPUSH_VERIFY=1).');
+        return;
+      }
+      const prePushTier = resolvePrePushVerifyTier(config);
+      if (!prePushTier) return;
+      opts.tier = opts.tier || prePushTier;
+    }
+
     const tiers = getVerifyTiers();
     const tierKeys = Object.keys(tiers);
     if (tierKeys.length === 0) {
+      if (opts.prePush) {
+        console.log('Pre-push verify skipped: no verification commands configured in ticket.config.json.');
+        return;
+      }
       fail(
         'no verification commands configured in ticket.config.json (set "verify" or "verifyCommand")',
       );

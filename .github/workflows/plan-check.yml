@@ -7,7 +7,7 @@ name: Plan check
 on:
   pull_request:
     branches: ["main"]
-    types: [opened, synchronize, reopened, labeled, unlabeled]
+    types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
 permissions:
   contents: read
@@ -15,6 +15,7 @@ permissions:
 jobs:
   plan-check:
     name: Plan is closed out
+    if: github.event.pull_request.draft == false
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -40,7 +41,9 @@ jobs:
           BASE_SHA: ${{ github.event.pull_request.base.sha }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          if ! git diff --quiet "$BASE_SHA"..."$HEAD_SHA" -- scripts/ticket.mjs scripts/ticket.test.mjs; then
+          if [ "$(node -e "try{const{execFileSync}=require('child_process');const c=JSON.parse(execFileSync('git',['show',process.env.BASE_SHA+':scripts/ticket.config.json'],{encoding:'utf8'}));console.log(c.ciSkipTicketTests===true?'skip':'run')}catch{console.log('run')}")" = "skip" ]; then
+            echo "Skipping ticket.test.mjs on CI (ciSkipTicketTests=true in base config)."
+          elif ! git diff --quiet "$BASE_SHA"..."$HEAD_SHA" -- scripts/ticket.mjs scripts/ticket.test.mjs; then
             node --test scripts/ticket.test.mjs
           else
             echo "Skipping ticket.test.mjs (scripts/ticket.mjs and scripts/ticket.test.mjs unchanged)."
