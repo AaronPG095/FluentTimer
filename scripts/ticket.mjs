@@ -225,6 +225,23 @@ function resolvePrePushVerifyTier(cfg = config) {
   return cfg.prePushVerify === true ? 'test' : '';
 }
 
+function verifyExecEnv(baseEnv = process.env) {
+  const env = { ...baseEnv, CI: '1' };
+  for (const key of [
+    'GIT_DIR',
+    'GIT_WORK_TREE',
+    'GIT_COMMON_DIR',
+    'GIT_INDEX_FILE',
+    'GIT_OBJECT_DIRECTORY',
+    'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+    'GIT_QUARANTINE_PATH',
+    'GIT_PREFIX',
+  ]) {
+    delete env[key];
+  }
+  return env;
+}
+
 function artifactPatterns(cfg = config) {
   return new Set([
     '.tmp',
@@ -2274,7 +2291,7 @@ function runVerifyCmd(cmd, { cwd = repoRoot, captureOutput = false, silent = fal
         cwd,
         encoding: 'utf8',
         stdio: silent ? 'ignore' : 'inherit',
-        env: { ...process.env, CI: '1' },
+        env: verifyExecEnv(),
       });
       return { ok: true, status: 0, output: '' };
     } catch (err) {
@@ -2285,7 +2302,7 @@ function runVerifyCmd(cmd, { cwd = repoRoot, captureOutput = false, silent = fal
     cwd,
     shell: true,
     encoding: 'utf8',
-    env: { ...process.env, CI: '1' },
+    env: verifyExecEnv(),
   });
   if (!silent) {
     if (res.stdout) process.stdout.write(res.stdout);
@@ -3726,7 +3743,7 @@ const commands = {
           cwd: repoRoot,
           encoding: 'utf8',
           stdio: ['pipe', 'pipe', 'pipe'],
-          env: { ...process.env, CI: '1' },
+          env: verifyExecEnv(),
         });
         const outLines = out.trim().split('\n').filter(Boolean);
         testOutput = outLines.slice(-5).join('\n');
@@ -4103,7 +4120,7 @@ const commands = {
         execSync(tier.cmd, {
           cwd: repoRoot,
           stdio: 'inherit',
-          env: { ...process.env, CI: '1' },
+          env: verifyExecEnv(),
         });
       } catch (error) {
         fail(`verification failed before opening PR: ${error.message}`);
@@ -5205,7 +5222,7 @@ const commands = {
             cwd: repoRoot,
             encoding: 'utf8',
             stdio: 'inherit',
-            env: { ...process.env, CI: '1' },
+            env: verifyExecEnv(),
           });
           console.log(`✓ Tier "${t}" passed.\n`);
         } catch (err) {
@@ -5230,7 +5247,7 @@ const commands = {
         cwd: repoRoot,
         encoding: 'utf8',
         stdio: 'inherit',
-        env: { ...process.env, CI: '1' },
+        env: verifyExecEnv(),
       });
       console.log(`✓ Verification (${resolved.tier}) passed.`);
     } catch (err) {
@@ -5569,7 +5586,7 @@ const commands = {
               cwd: dir,
               encoding: 'utf8',
               stdio: ['pipe', 'pipe', 'pipe'],
-              env: { ...process.env, CI: '1' },
+              env: verifyExecEnv(),
             });
             const dur = ((Date.now() - t0) / 1000).toFixed(1);
             process.stdout.write(

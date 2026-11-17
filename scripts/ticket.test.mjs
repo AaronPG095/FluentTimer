@@ -3867,9 +3867,28 @@ test('T3.5: verify --pre-push, prePushVerify hook/doctor, merge local Notion clo
   cfg.prePushVerify = true;
   writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
 
-  const runOn = f.run('verify', ['--pre-push'], [], { omitPlan: true });
+  const runOn = f.run('verify', ['--pre-push'], [], {
+    omitPlan: true,
+    envOverrides: {
+      GIT_DIR: join(f.root, '.bogus-git-dir'),
+      GIT_WORK_TREE: join(f.root, '.bogus-wt'),
+    },
+  });
   assert.equal(runOn.status, 0, runOn.stderr);
   assert.match(runOn.stdout, /prepush-test-ok/);
+
+  // verify strips GIT_DIR/GIT_WORK_TREE from child test commands (prevents linked-worktree hook hijacking)
+  cfg.verify.full = 'node -e "const cp=require(\'child_process\'); if(process.env.GIT_DIR||process.env.GIT_WORK_TREE) process.exit(2); cp.execFileSync(\'git\',[\'rev-parse\',\'--is-inside-work-tree\'],{stdio:\'inherit\'}); console.log(\'git-env-clean\')"';
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+  const cleanGitEnv = f.run('verify', ['--pre-push', '--tier', 'full'], [], {
+    omitPlan: true,
+    envOverrides: {
+      GIT_DIR: join(f.root, '.bogus-git-dir'),
+      GIT_WORK_TREE: join(f.root, '.bogus-wt'),
+    },
+  });
+  assert.equal(cleanGitEnv.status, 0, cleanGitEnv.stderr);
+  assert.match(cleanGitEnv.stdout, /git-env-clean/);
 
   // GIT_SKIP_PREPUSH_VERIFY=1 skips execution
   const skipEnv = f.run('verify', ['--pre-push'], [], {
