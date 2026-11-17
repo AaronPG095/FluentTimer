@@ -3984,19 +3984,27 @@ test('T3.5: verify --pre-push, prePushVerify hook/doctor, merge local Notion clo
       encoding: 'utf8',
     });
   assert.equal(runSync(['--init-prefix', 'OPT']).status, 0);
+  const targetDonePath = join(target, '.github/workflows/ticket-done.yml');
+  const hadPullRequest = /pull_request:/.test(readFileSync(targetDonePath, 'utf8'));
   const targetCfgPath = join(target, 'scripts/ticket.config.json');
   const targetCfg = JSON.parse(readFileSync(targetCfgPath, 'utf8'));
   targetCfg.ci = { ticketDoneWorkflow: false };
   writeFileSync(targetCfgPath, JSON.stringify(targetCfg, null, 2));
 
-  const extraCheck = runSync(['--check']);
-  assert.equal(extraCheck.status, 1, extraCheck.stderr);
-  assert.match(extraCheck.stdout, /\[EXTRA\].*ticket-done\.yml/);
+  if (hadPullRequest) {
+    const driftCheck = runSync(['--check']);
+    assert.equal(driftCheck.status, 1, driftCheck.stderr);
+    assert.match(driftCheck.stdout, /\[DRIFT\].*ticket-done\.yml/);
 
-  const removedSync = runSync();
-  assert.equal(removedSync.status, 0, removedSync.stderr);
-  assert.match(removedSync.stdout, /\[REMOVED\].*ticket-done\.yml/);
-  assert.equal(existsSync(join(target, '.github/workflows/ticket-done.yml')), false);
+    const updatedSync = runSync();
+    assert.equal(updatedSync.status, 0, updatedSync.stderr);
+    assert.match(updatedSync.stdout, /\[UPDATED\].*ticket-done\.yml/);
+  } else {
+    assert.equal(runSync().status, 0);
+  }
+  const doneWorkflow = readFileSync(targetDonePath, 'utf8');
+  assert.match(doneWorkflow, /workflow_dispatch:/);
+  assert.doesNotMatch(doneWorkflow, /pull_request:/);
   assert.equal(runSync(['--check']).status, 0);
   const selfDoctorBundleCheck = spawnSync(
     process.execPath,

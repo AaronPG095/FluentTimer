@@ -9,7 +9,7 @@
 //   node scripts/sync.mjs --remote [--check] [--dry-run]
 //   node scripts/sync.mjs <repo-path> [--check] [--dry-run] [--init-prefix <PREFIX>]
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, lstatSync, unlinkSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, lstatSync } from 'node:fs';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -81,14 +81,6 @@ async function loadBundle() {
     console.log(`Upstream release: ${opts.upstream}@${ref}`);
   }
   const read = async (path) => {
-    if (
-      path === '.github/workflows/ticket-done.yml' &&
-      !testSource &&
-      !opts.remote &&
-      !existsSync(join(workflowRoot, path))
-    ) {
-      return null;
-    }
     const text = testSource
       ? readFileSync(join(testSource, path), 'utf8')
       : opts.remote
@@ -155,12 +147,11 @@ function writeManaged(destPath, content, dryRun) {
   writeFileSync(destPath, content.replace(/\r\n/g, '\n'), 'utf8');
 }
 
-function removeManaged(destPath, dryRun) {
-  if (dryRun) {
-    console.log(`  [dry-run] remove ${destPath}`);
-    return;
-  }
-  if (existsSync(destPath)) unlinkSync(destPath);
+function disablePullRequestTrigger(text) {
+  return text.replace(
+    /^on:\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*/m,
+    'on:\n  workflow_dispatch:\n',
+  );
 }
 
 export function renderDevProcessSection({ prefix, noNewFilesUnder = ['src'], maxChangedLines = 40 }) {
@@ -257,17 +248,19 @@ async function sync() {
       compare(path, canonicalSelf ? files.get(path) :
         files.get(path).replace(/\b[\w-]+-Plan-/g, () => prefix + '-Plan-'));
     for (const path of manifest.branches) {
+      const text = files.get(path);
       if (path === '.github/workflows/ticket-done.yml' && cfg.ci?.ticketDoneWorkflow === false) {
-        if (existsSync(join(repo, path))) {
-          updates.push({ repoName, path, destination: join(repo, path), remove: true });
-        }
+        compare(path, canonicalSelf ? text : disablePullRequestTrigger(text));
         continue;
       }
-      const text = files.get(path);
-      if (!text) throw new Error('Missing required bundle file: ' + path);
       const branchList = /^(\s*branches:\s*)\[[^\r\n]+\]/gm;
-      if (!branchList.test(text))
+      if (!branchList.test(text)) {
+        if (path === '.github/workflows/ticket-done.yml' && /^\s*workflow_dispatch:/m.test(text)) {
+          compare(path, text);
+          continue;
+        }
         throw new Error('Missing branch template in required bundle file: ' + path);
+      }
       compare(path, canonicalSelf ? text :
         text.replace(branchList, (_, key) => key + branches));
     }
@@ -286,11 +279,8 @@ async function sync() {
   // Validate all source and target inputs before changing a managed file.
   for (const update of updates) {
     if (opts.check) {
-      const state = update.remove ? 'EXTRA' : update.missing ? 'MISSING' : 'DRIFT';
+      const state = update.missing ? 'MISSING' : 'DRIFT';
       console.log('[' + state + '] ' + update.repoName + ': ' + update.path);
-    } else if (update.remove) {
-      removeManaged(update.destination, opts.dryRun);
-      if (!opts.dryRun) console.log('[REMOVED] ' + update.repoName + ': ' + update.path);
     } else {
       writeManaged(update.destination, update.text, opts.dryRun);
       if (!opts.dryRun) console.log('[UPDATED] ' + update.repoName + ': ' + update.path);
