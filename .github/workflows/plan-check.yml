@@ -35,5 +35,13 @@ jobs:
           node scripts/ticket.mjs ci-check --base "$BASE_SHA" --head "$HEAD_SHA"
           git restore --source=HEAD --worktree -- scripts/ticket.mjs scripts/ticket.config.json
 
-      - name: Test ticket CLI
-        run: node --test scripts/ticket.test.mjs
+      - name: Test ticket CLI (when modified)
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          if ! git diff --quiet "$BASE_SHA"..."$HEAD_SHA" -- scripts/ticket.mjs scripts/ticket.test.mjs; then
+            node --test scripts/ticket.test.mjs
+          else
+            echo "Skipping ticket.test.mjs (scripts/ticket.mjs and scripts/ticket.test.mjs unchanged)."
+          fi

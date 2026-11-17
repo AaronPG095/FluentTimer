@@ -4,6 +4,7 @@
     "scripts/workflow-manifest.json",
     "scripts/ticket.mjs",
     "scripts/ticket.test.mjs",
+    "scripts/hooks/adw-hook.mjs",
     "scripts/sync.mjs",
     "scripts/sync-repos.ps1",
     "scripts/install.ps1",
@@ -13,8 +14,7 @@
     ".claude/skills/quick-review/SKILL.md",
     ".agents/skills/agentic-workflow/SKILL.md",
     ".claude/skills/agentic-workflow/SKILL.md",
-    ".github/pull_request_template.md",
-    ".github/workflows/workflow-sync.yml"
+    ".github/pull_request_template.md"
   ],
   "prefix": [
     ".agents/skills/dev-workflow/SKILL.md",
@@ -30,8 +30,38 @@
     "plansDir": "docs/plans",
     "protectedBranches": ["main"],
     "captureSources": ["Claude", "Codex", "Gemini", "ChatGPT", "Notion AI", "Other"],
+    "verify": {
+      "test": "npm test",
+      "full": "npm test"
+    },
     "verifyCommand": "npm test",
-    "requireReview": false,
+    "hygiene": {
+      "maxFileSizeKB": 1024,
+      "disallowedPatterns": [".tmp", "test-results", "coverage", ".worktrees"]
+    },
+    "agentic": {
+      "maxRetries": 3,
+      "verifyTier": "test"
+    },
+    "requireReview": true,
+    "allowSelfReview": false,
+    "invariants": {
+      "mirrorDirs": [[".agents/skills", ".claude/skills"]]
+    },
+    "appetite": {
+      "S": { "maxLines": 150, "maxFiles": 5 },
+      "M": { "maxLines": 450, "maxFiles": 12 },
+      "L": { "maxLines": 1000, "maxFiles": 25 }
+    },
+    "versioning": {
+      "enabled": false,
+      "currentVersion": "1.0.0",
+      "activeTrain": "1.1.0",
+      "roadmapPath": "docs/ROADMAP.md",
+      "changelogPath": "CHANGELOG.md",
+      "tagPrefix": "v",
+      "requireVersionOnPlans": false
+    },
     "noPlan": {
       "maxChangedLines": 40,
       "noNewFilesUnder": ["src"]

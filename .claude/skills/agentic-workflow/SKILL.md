@@ -43,7 +43,8 @@ flowchart TD
         W1["Spawn Worktrees\n(ticket.mjs wave --spawn)"]
         W2["Parallel Agent Execution\n(One Sub-Agent per Worktree)"]
         W3["Live Swarm Dashboard\n(ticket.mjs wave --status)"]
-        W1 --> W2 --> W3
+        W4["Verify & Prune Closed Waves\n(ticket.mjs wave --check / --prune)"]
+        W1 --> W2 --> W3 --> W4
     end
 
     Plan --> LevelA
@@ -86,6 +87,14 @@ Use this when you want an agent to autonomously advance a plan step-by-step with
    This deterministically runs the verify command, checks that tests exit with code 0, marks the checkbox `[x]` with verified evidence, and commits the checkpoint to git.
 
 5. **Repeat** until `node scripts/ticket.mjs step` reports all items completed.
+
+### Outer-Loop Autonomous Supervisor (`run`)
+To drive an external CLI runner (such as `claude -p`, `codex exec`, or a custom harness script) automatically step-by-step from the terminal or CI:
+```bash
+node scripts/ticket.mjs run [<plan>] --cmd "<runner>" [--review-cmd "<runner>"] [--commit] [--tier <name>] [--max-retries <N>] [--max-steps <N>] [--no-review] [--dry-run]
+```
+- Receives each `builder` brief on `stdin` and in `ADW_PROMPT_FILE` (alongside `ADW_PLAN`, `ADW_STEP`, `ADW_ROLE`).
+- Runs `checkpoint` automatically after each runner pass, injects any verification failure tail into the next retry brief under `## Last Verification Failure`, trips at `maxRetries`, and runs a fresh `--role reviewer` pass once all items finish.
 
 ---
 
@@ -149,6 +158,14 @@ Coordinate multi-plan development across isolated git worktrees without context 
    node scripts/ticket.mjs wave --status
    ```
    Displays a live table tracking plan name, branch, active worktree, checkbox progress (`N/Total`), review verdict, and close-out readiness.
+
+4. **Check & Prune Wave Worktrees:**
+   ```bash
+   # Verify plan criteria + hygiene (+ optional verify command) across all active wave worktrees
+   node scripts/ticket.mjs wave --check [--test] [--strict]
+   # Safely prune clean, unlocked worktrees for closed/merged wave plans
+   node scripts/ticket.mjs wave --prune [--dry-run] [--all]
+   ```
 
 ---
 
