@@ -2976,7 +2976,7 @@ test('T1.5: runInvariants enforces mirrorDirs, readmeCliSync, zeroDependencies, 
     join(f.root, 'README.md'),
     [
       'new', 'prime', 'tick', 'defer', 'step', 'checkpoint', 'run', 'create', 'start',
-      'log', 'handoff', 'resume', 'pack', 'review', 'check', 'lint', 'ship', 'pr', 'done',
+      'log', 'handoff', 'resume', 'pack', 'review', 'check', 'lint', 'ship', 'pr', 'merge', 'done',
       'overview', 'hook', 'adr', 'exec', 'wt', 'recall', 'archive', 'doctor', 'verify',
       'hygiene', 'switch', 'split', 'fleet', 'wave', 'lesson', 'stats', 'release',
     ].join(' '),
@@ -3840,4 +3840,168 @@ test('T3.4: omitted requireReview defaults to true, enforces independent review,
   ]);
   assert.equal(revRes.status, 0, revRes.stderr);
   assert.equal(f.run('check').status, 0);
+});
+
+test('T3.5: verify --pre-push, prePushVerify hook/doctor, merge local Notion closeout, and sync ci.ticketDoneWorkflow', async (t) => {
+  // 1. verify --pre-push and hook install / doctor surfacing
+  const f = fixture(t, '', [], {
+    verify: {
+      test: 'node -e "console.log(\'prepush-test-ok\')"',
+      full: 'node -e "console.log(\'prepush-full-ok\')"',
+    },
+  });
+  f.git('init', '-b', 'main');
+  f.git('config', 'user.name', 'Test');
+  f.git('config', 'user.email', 'test@example.invalid');
+  f.git('add', '.');
+  f.git('commit', '-m', 'init');
+
+  // prePushVerify omitted -> --pre-push exits 0 without running verify command
+  const skipOff = f.run('verify', ['--pre-push'], [], { omitPlan: true });
+  assert.equal(skipOff.status, 0, skipOff.stderr);
+  assert.doesNotMatch(skipOff.stdout, /prepush-test-ok/);
+
+  // Enable prePushVerify: true
+  const cfgPath = join(f.root, 'scripts/ticket.config.json');
+  const cfg = JSON.parse(readFileSync(cfgPath, 'utf8'));
+  cfg.prePushVerify = true;
+  writeFileSync(cfgPath, JSON.stringify(cfg, null, 2));
+
+  const runOn = f.run('verify', ['--pre-push'], [], { omitPlan: true });
+  assert.equal(runOn.status, 0, runOn.stderr);
+  assert.match(runOn.stdout, /prepush-test-ok/);
+
+  // GIT_SKIP_PREPUSH_VERIFY=1 skips execution
+  const skipEnv = f.run('verify', ['--pre-push'], [], {
+    omitPlan: true,
+    envOverrides: { GIT_SKIP_PREPUSH_VERIFY: '1' },
+  });
+  assert.equal(skipEnv.status, 0, skipEnv.stderr);
+  assert.match(skipEnv.stdout, /Pre-push verify skipped/);
+
+  // hook install includes --pre-push zero-SHA guard and doctor prints prePushVerify
+  const hookRes = f.run('hook', ['install'], [], { omitPlan: true });
+  assert.equal(hookRes.status, 0, hookRes.stderr);
+  const hookScript = readFileSync(join(f.root, '.git/hooks/pre-push'), 'utf8');
+  assert.match(hookScript, /verify --pre-push/);
+  assert.match(hookScript, /0000000000000000000000000000000000000000/);
+  const dr = f.run('doctor', [], [], { omitPlan: true });
+  assert.equal(dr.status, 0, dr.stderr);
+  assert.match(dr.stdout, /Pre-push:\s+installed \(prePushVerify: test\)/);
+
+  // 2. merge command merges open PR via gh and closes Notion ticket locally
+  const mock = mkdtempSync(join(tmpdir(), 'adw-merge-mock-'));
+  t.after(() => rmSync(mock, { recursive: true, force: true }));
+  const log = join(mock, 'gh.jsonl');
+  const preload = join(mock, 'gh-mock.mjs');
+  const prUrl = 'https://github.com/example/repo/pull/99';
+  const taskId = '11111111111141118111111111111111';
+  writeFileSync(
+    preload,
+    `
+    import { createRequire } from 'node:module';
+    const require = createRequire(import.meta.url);
+    const cp = require('node:child_process');
+    const fs = require('node:fs');
+    const orig = cp.execFileSync;
+    cp.execFileSync = function(cmd, args, options = {}) {
+      if (cmd !== 'gh') return orig.apply(this, arguments);
+      fs.appendFileSync(process.env.MERGE_MOCK_LOG, JSON.stringify(args) + '\\n');
+      if (args[1] === 'view') {
+        return JSON.stringify({ url: '${prUrl}', state: 'OPEN', headRefName: 'feat/x' });
+      }
+      if (args[1] === 'merge') return '';
+      throw Error('unexpected gh command: ' + args.join(' '));
+    };
+    require('node:module').syncBuiltinESMExports();
+  `,
+  );
+
+  const fMerge = fixture(
+    t,
+    [
+      'status: shipped',
+      `ticket: https://www.notion.so/${taskId}`,
+      'agent: Gemini',
+      'reviewedBy: Gemini',
+      'reviewVerdict: pass',
+      'reviewSession: subagent-8888',
+      `pr: ${prUrl}`,
+    ].join('\n') + '\n',
+    [],
+    { requireReview: true },
+  );
+  fMerge.git('init', '-b', 'main');
+  fMerge.git('config', 'user.name', 'Test');
+  fMerge.git('config', 'user.email', 'test@example.invalid');
+  fMerge.git('add', '.');
+  fMerge.git('commit', '-m', 'init');
+  const planBody = readFileSync(fMerge.plan, 'utf8')
+    .replace('- [ ] AC1\n', '- [x] AC1 verified: ok\n')
+    .replace('- [ ] Step\n', '- [x] Step\n');
+  writeFileSync(fMerge.plan, planBody);
+  const revMergeRes = fMerge.run('review', [
+    '--agent', 'Gemini',
+    '--reviewer-id', 'subagent-8888',
+    '--verdict', 'pass',
+    '--summary', 'ok',
+  ]);
+  assert.equal(revMergeRes.status, 0, revMergeRes.stderr);
+  fMerge.git('add', '.');
+  fMerge.git('commit', '-m', 'reviewed');
+
+  const mergeRes = fMerge.run(
+    'merge',
+    ['--squash'],
+    [
+      { body: { id: taskId, properties: { Status: { status: { name: 'Doing' } }, 'Completed At': { date: null } } } },
+      { body: { id: taskId } },
+    ],
+    {
+      omitPlan: true,
+      envOverrides: {
+        NODE_OPTIONS: `--import=${pathToFileURL(preload).href}`,
+        MERGE_MOCK_LOG: log,
+      },
+    },
+  );
+  assert.equal(mergeRes.status, 0, mergeRes.stderr);
+  assert.match(mergeRes.stdout, /Merged pull request:/);
+  assert.match(mergeRes.stdout, /Ticket set to Done:/);
+  const ghCalls = readFileSync(log, 'utf8').trim().split('\n').map(JSON.parse);
+  assert.equal(ghCalls[0][1], 'view');
+  assert.deepEqual(ghCalls[1], ['pr', 'merge', prUrl, '--squash', '--delete-branch']);
+  const donePatch = mergeRes.calls.find(
+    (r) => r.method === 'PATCH' && r.url.includes(taskId) && r.body?.properties?.Status?.status?.name === 'Done',
+  );
+  assert.ok(donePatch, 'Expected Notion Status=Done patch during merge');
+
+  // 3. sync.mjs supports ci.ticketDoneWorkflow: false
+  const target = mkdtempSync(join(tmpdir(), 'adw-sync-nodone-'));
+  t.after(() => rmSync(target, { recursive: true, force: true }));
+  const runSync = (args = []) =>
+    spawnSync(process.execPath, [join(scripts, 'sync.mjs'), target, ...args], {
+      encoding: 'utf8',
+    });
+  assert.equal(runSync(['--init-prefix', 'OPT']).status, 0);
+  const targetCfgPath = join(target, 'scripts/ticket.config.json');
+  const targetCfg = JSON.parse(readFileSync(targetCfgPath, 'utf8'));
+  targetCfg.ci = { ticketDoneWorkflow: false };
+  writeFileSync(targetCfgPath, JSON.stringify(targetCfg, null, 2));
+
+  const extraCheck = runSync(['--check']);
+  assert.equal(extraCheck.status, 1, extraCheck.stderr);
+  assert.match(extraCheck.stdout, /\[EXTRA\].*ticket-done\.yml/);
+
+  const removedSync = runSync();
+  assert.equal(removedSync.status, 0, removedSync.stderr);
+  assert.match(removedSync.stdout, /\[REMOVED\].*ticket-done\.yml/);
+  assert.equal(existsSync(join(target, '.github/workflows/ticket-done.yml')), false);
+  assert.equal(runSync(['--check']).status, 0);
+  const selfDoctorBundleCheck = spawnSync(
+    process.execPath,
+    [join(target, 'scripts/sync.mjs'), target, '--check', '--bundle-only'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(selfDoctorBundleCheck.status, 0, selfDoctorBundleCheck.stderr);
 });

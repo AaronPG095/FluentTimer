@@ -9,7 +9,7 @@
 //   node scripts/sync.mjs --remote [--check] [--dry-run]
 //   node scripts/sync.mjs <repo-path> [--check] [--dry-run] [--init-prefix <PREFIX>]
 
-import { readFileSync, writeFileSync, existsSync, mkdirSync, lstatSync } from 'node:fs';
+import { readFileSync, writeFileSync, existsSync, mkdirSync, lstatSync, unlinkSync } from 'node:fs';
 import { dirname, join, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -81,6 +81,14 @@ async function loadBundle() {
     console.log(`Upstream release: ${opts.upstream}@${ref}`);
   }
   const read = async (path) => {
+    if (
+      path === '.github/workflows/ticket-done.yml' &&
+      !testSource &&
+      !opts.remote &&
+      !existsSync(join(workflowRoot, path))
+    ) {
+      return null;
+    }
     const text = testSource
       ? readFileSync(join(testSource, path), 'utf8')
       : opts.remote
@@ -147,6 +155,14 @@ function writeManaged(destPath, content, dryRun) {
   writeFileSync(destPath, content.replace(/\r\n/g, '\n'), 'utf8');
 }
 
+function removeManaged(destPath, dryRun) {
+  if (dryRun) {
+    console.log(`  [dry-run] remove ${destPath}`);
+    return;
+  }
+  if (existsSync(destPath)) unlinkSync(destPath);
+}
+
 export function renderDevProcessSection({ prefix, noNewFilesUnder = ['src'], maxChangedLines = 40 }) {
   const folders = noNewFilesUnder.map(f => `\`${f}/\``).join(', ');
   return [
@@ -164,10 +180,10 @@ export function renderDevProcessSection({ prefix, noNewFilesUnder = ['src'], max
     '   - Record architectural choices in `docs/decisions/` with `node scripts/ticket.mjs adr "<Title>"`. Search past decisions and notes with `node scripts/ticket.mjs recall "<query>" [--fleet]`. Manage release trains in versioned repos with `node scripts/ticket.mjs release [status|notes|closeout|init] [<version>]`. Manage isolated worktrees cleanly with `node scripts/ticket.mjs wt [list|new|prune] [--fleet]`. Run `node scripts/ticket.mjs doctor [--fleet]` for fleet diagnostic health. Progress lives in the plan; do not post progress to Notion.',
     '   - **Before you stop** (end of session, usage limit, handing over), run `node scripts/ticket.mjs handoff --agent <you> --done "<done>" --next "<step>" [--open "<questions>"]` (or `log`) and commit the plan. To continue someone else\'s work, run `node scripts/ticket.mjs resume`, read the plan fully, and resume at the first unticked step.',
     '5. **Review.** Before closing out, run `node scripts/ticket.mjs pack [<plan>] [--test]` (0 LLM tokens, embeds test results with `--test`) to generate a compact review digest (plan criteria, hygiene check, and filtered diff). Every non-trivial PR-sized plan **MUST** undergo an **independent sub-agent, fresh-session, or second-model review** (`requireReview: true`, `allowSelfReview: false` by default) checking plan fidelity, regressions, and verification honesty using the `quick-review` skill, then stamp the result with `node scripts/ticket.mjs review [<plan>] --agent <reviewer-client> --reviewer-id <subagent-id> --verdict <pass|warn|block> --summary "<findings>"` (`--reviewer-id` may be omitted only when `--agent` differs from the implementing agent). A `block` verdict fails close-out until resolved.',
-    '6. **Finish.** You are done only when `node scripts/ticket.mjs check [<plan>]` passes. Open the PR and ship in one command: `node scripts/ticket.mjs pr [--verify] [--auto] [--draft]` (or open manually with the template filled in and run `node scripts/ticket.mjs ship [<plan>] --pr <url>`). Merging closes the Task (Done and Completed At); never set it to Done yourself.',
+    '6. **Finish.** You are done only when `node scripts/ticket.mjs check [<plan>]` passes. Open the PR and ship in one command: `node scripts/ticket.mjs pr [--verify] [--auto] [--draft]` (or open manually with the template filled in and run `node scripts/ticket.mjs ship [<plan>] --pr <url>`). Merge via `node scripts/ticket.mjs merge [<plan>]` (merges the PR and closes the Task locally with zero Actions minutes) or let `ticket-done.yml` close the Task on merge; never set a Task to Done before the PR merges.',
     '',
     'If a `ticket.mjs` command fails (for example no `NOTION_TOKEN` in Notion mode), say so and stop at that step. Do not create or update the ticket another way. CI (`Plan check`) blocks a PR whose plan has open items, unverified criteria, a `block` review verdict, removed checkboxes or no ticket, and a `no-plan` PR that is not trivial.',
-    'Git pre-push guardrail: run `node scripts/ticket.mjs hook install` to prevent accidental direct pushes to protected branches.',
+    'Git pre-push guardrail: run `node scripts/ticket.mjs hook install` to prevent accidental direct pushes to protected branches (and run local `verify` before push when `prePushVerify` is configured).',
     '',
     'Upstream workflow & multi-repo sync: https://github.com/AaronPG095/AI-Dev-Workflow (`node scripts/sync.mjs --remote` or `scripts/sync-repos.ps1`).',
   ].join('\n');
@@ -241,7 +257,14 @@ async function sync() {
       compare(path, canonicalSelf ? files.get(path) :
         files.get(path).replace(/\b[\w-]+-Plan-/g, () => prefix + '-Plan-'));
     for (const path of manifest.branches) {
+      if (path === '.github/workflows/ticket-done.yml' && cfg.ci?.ticketDoneWorkflow === false) {
+        if (existsSync(join(repo, path))) {
+          updates.push({ repoName, path, destination: join(repo, path), remove: true });
+        }
+        continue;
+      }
       const text = files.get(path);
+      if (!text) throw new Error('Missing required bundle file: ' + path);
       const branchList = /^(\s*branches:\s*)\[[^\r\n]+\]/gm;
       if (!branchList.test(text))
         throw new Error('Missing branch template in required bundle file: ' + path);
@@ -263,8 +286,11 @@ async function sync() {
   // Validate all source and target inputs before changing a managed file.
   for (const update of updates) {
     if (opts.check) {
-      const state = update.missing ? 'MISSING' : 'DRIFT';
+      const state = update.remove ? 'EXTRA' : update.missing ? 'MISSING' : 'DRIFT';
       console.log('[' + state + '] ' + update.repoName + ': ' + update.path);
+    } else if (update.remove) {
+      removeManaged(update.destination, opts.dryRun);
+      if (!opts.dryRun) console.log('[REMOVED] ' + update.repoName + ': ' + update.path);
     } else {
       writeManaged(update.destination, update.text, opts.dryRun);
       if (!opts.dryRun) console.log('[UPDATED] ' + update.repoName + ': ' + update.path);
