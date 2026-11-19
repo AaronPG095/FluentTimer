@@ -1,7 +1,7 @@
 ---
 title: Plan - Chore: Sync ADW 40 To 44
 ticket: https://app.notion.com/p/FT-Plan-Chore-Sync-ADW-40-To-44-41d0b9c6786f81269b38ef6a632cf1a0
-status: in-progress
+status: shipped
 priority: 
 state: 
 due: 
@@ -17,6 +17,7 @@ reviewVerdict: pass
 reviewSession: 30e83ae2-7909-43a3-ba93-a7d7c2c21931
 baseBranch: main
 reviewFingerprint: 9857ff6b0f80dde5033a111db50f568bf1379a284c493dfc5e8aaeb7d72c65d0
+pr: https://github.com/AaronPG095/FluentTimer/pull/13
 ---
 # Sync ADW 40 To 44
 ## Summary
