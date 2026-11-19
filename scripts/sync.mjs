@@ -148,6 +148,9 @@ function writeManaged(destPath, content, dryRun) {
 }
 
 function disablePullRequestTrigger(text) {
+  if (/^  workflow_dispatch:/m.test(text)) {
+    return text.replace(/^  pull_request(?:_target)?:\r?\n(?: {4}[^\r\n]*(?:\r?\n|$))*/m, '');
+  }
   return text.replace(
     /^on:\r?\n(?:[ \t]+[^\r\n]*(?:\r?\n|$))*/m,
     'on:\n  workflow_dispatch:\n',

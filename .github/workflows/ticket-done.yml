@@ -5,9 +5,15 @@ name: Close ticket on merge
 # local tracker mode derives completion from the protected branch.
 
 on:
-  pull_request:
+  pull_request_target:
     branches: ["main"]
     types: [closed]
+  workflow_dispatch:
+    inputs:
+      pr:
+        description: Number of the merged pull request
+        required: true
+        type: string
 
 permissions:
   contents: read
@@ -16,13 +22,16 @@ permissions:
 jobs:
   close-ticket:
     name: Set Notion Task to Done
-    if: github.event.pull_request.merged == true
+    if: >-
+      (github.event_name == 'workflow_dispatch' && github.ref == format('refs/heads/{0}', github.event.repository.default_branch))
+      || github.event.pull_request.merged == true
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-          ref: ${{ github.event.pull_request.merge_commit_sha }}
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -32,13 +41,5 @@ jobs:
         env:
           NOTION_TOKEN: ${{ secrets.NOTION_TOKEN }}
           GH_TOKEN: ${{ github.token }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          MERGE_SHA: ${{ github.event.pull_request.merge_commit_sha }}
-          MERGED_AT: ${{ github.event.pull_request.merged_at }}
-          CHANGED_FILES: ${{ github.event.pull_request.changed_files }}
-        run: |
-          pr_files="$RUNNER_TEMP/adw-pr-files.json"
-          gh api --paginate --slurp "repos/$GITHUB_REPOSITORY/pulls/$PR_NUMBER/files?per_page=100" > "$pr_files"
-          node scripts/ticket.mjs ci-done --head "$MERGE_SHA" --pr-files "$pr_files" \
-            --pr "$PR_URL" --merged-at "$MERGED_AT" --changed-files "$CHANGED_FILES"
+          PR_NUMBER: ${{ inputs.pr || github.event.pull_request.number }}
+        run: node scripts/ticket.mjs ci-done --pr-number "$PR_NUMBER"

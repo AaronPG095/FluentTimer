@@ -39,7 +39,13 @@
   },
   "agentic": {
     "maxRetries": 3,
-    "verifyTier": "test"
+    "verifyTier": "test",
+    "models": {
+      "planner": "gemini-4-neon-medium",
+      "builder": "gemini-4-hydrogen-medium",
+      "fixer": "gemini-4-hydrogen-medium",
+      "reviewer": "gemini-4-neon-low"
+    }
   },
   "requireReview": true,
   "allowSelfReview": false
