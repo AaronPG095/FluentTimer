@@ -63,7 +63,8 @@ Use this when you want an agent to autonomously advance a plan step-by-step with
    node scripts/ticket.mjs step
    # Or for structured JSON:
    node scripts/ticket.mjs step --json
-   # Or for a dedicated builder prompt:
+   # Or for a dedicated role brief:
+   node scripts/ticket.mjs step --role planner
    node scripts/ticket.mjs step --role builder
    ```
 
@@ -93,7 +94,7 @@ To drive an external CLI runner (such as `claude -p`, `codex exec`, or a custom 
 ```bash
 node scripts/ticket.mjs run [<plan>] --cmd "<runner>" [--review-cmd "<runner>"] [--commit] [--tier <name>] [--max-retries <N>] [--max-steps <N>] [--no-review] [--dry-run]
 ```
-- Receives each `builder` brief on `stdin` and in `ADW_PROMPT_FILE` (alongside `ADW_PLAN`, `ADW_STEP`, `ADW_ROLE`).
+- Receives each `builder` brief on `stdin` and in `ADW_PROMPT_FILE` (alongside `ADW_PLAN`, `ADW_STEP`, `ADW_ROLE`, and `ADW_MODEL` resolved from `agentic.models` for the active role).
 - Runs `checkpoint` automatically after each runner pass, injects any verification failure tail into the next retry brief under `## Last Verification Failure`, trips at `maxRetries`, and runs a fresh `--role reviewer` pass once all items finish.
 
 ---
@@ -121,7 +122,7 @@ Prevent confirmation bias by separating the Builder from the Reviewer.
 
 3. **Stamp Verdict:**
    ```bash
-   node scripts/ticket.mjs review --agent <client> --verdict <pass|warn|block> --summary "<concise findings>"
+   node scripts/ticket.mjs review --agent <client> [--model <model-id>] --verdict <pass|warn|block> --summary "<concise findings>"
    ```
 
 4. **Handling Block Verdicts (The Fixer Role):**
@@ -166,6 +167,28 @@ Coordinate multi-plan development across isolated git worktrees without context 
    # Safely prune clean, unlocked worktrees for closed/merged wave plans
    node scripts/ticket.mjs wave --prune [--dry-run] [--all]
    ```
+
+---
+
+## Role-to-Model Routing (`agentic.models`)
+
+Configure per-role target models in `scripts/ticket.config.json`:
+```json
+"agentic": {
+  "maxRetries": 3,
+  "verifyTier": "test",
+  "models": {
+    "planner": "gemini-4-neon-medium",
+    "builder": "gemini-4-hydrogen-medium",
+    "fixer": "gemini-4-hydrogen-medium",
+    "reviewer": "gemini-4-neon-low"
+  }
+}
+```
+- `step`, `prime`, `review --prompt`, and `run --dry-run` display the configured model per role and omit it cleanly when `agentic.models` is unset.
+- `run` exports `ADW_MODEL` for the active role (`builder` or `reviewer`) to external runners.
+- **Antigravity `swarm` delegation:** Because `invoke_subagent` only supports coarse tiers, use `swarm` `add` with `model` set to the role's configured model ID, and pass `--model <id>` to `ticket.mjs review`.
+- **Cross-client compatibility:** Claude Code, Codex, and Cursor sessions can map `agentic.models` to their own model IDs or omit the block.
 
 ---
 
