@@ -6,9 +6,11 @@ import {
   readFileSync,
   writeFileSync,
   copyFileSync,
+  cpSync,
   rmSync,
   existsSync,
   readdirSync,
+  symlinkSync,
 } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, dirname, basename } from 'node:path';
@@ -43,12 +45,40 @@ const defaultNotionConfig = {
   },
 };
 
+let cachedGitTemplateDir = null;
+function getGitTemplateDir() {
+  if (!cachedGitTemplateDir) {
+    cachedGitTemplateDir = mkdtempSync(join(tmpdir(), 'ticket-git-tpl-'));
+    execFileSync('git', ['init', '-b', 'main'], {
+      cwd: cachedGitTemplateDir,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['config', 'user.name', 'Test'], {
+      cwd: cachedGitTemplateDir,
+      stdio: 'ignore',
+    });
+    execFileSync('git', ['config', 'user.email', 'test@example.invalid'], {
+      cwd: cachedGitTemplateDir,
+      stdio: 'ignore',
+    });
+    process.on('exit', () => {
+      try {
+        rmSync(cachedGitTemplateDir, { recursive: true, force: true });
+      } catch {}
+    });
+  }
+  return cachedGitTemplateDir;
+}
+
 function fixture(t, front = '', responses = [], configOverrides = {}) {
   const root = mkdtempSync(join(tmpdir(), 'ticket-regression-'));
   t.after(() => rmSync(root, { recursive: true, force: true }));
   mkdirSync(join(root, 'scripts'));
   mkdirSync(join(root, 'docs/plans'), { recursive: true });
   copyFileSync(join(scripts, 'ticket.mjs'), join(root, 'scripts/ticket.mjs'));
+  if (existsSync(join(scripts, 'lib'))) {
+    cpSync(join(scripts, 'lib'), join(root, 'scripts/lib'), { recursive: true });
+  }
   writeFileSync(
     join(root, 'scripts/ticket.config.json'),
     JSON.stringify({ ...defaultNotionConfig, ...configOverrides }, null, 2),
@@ -135,6 +165,27 @@ if (github) {
     };
   }
   function git(...args) {
+    if (args[0] === 'init' && !existsSync(join(root, '.git'))) {
+      cpSync(join(getGitTemplateDir(), '.git'), join(root, '.git'), {
+        recursive: true,
+      });
+      if (args[1] === '-b' && args[2] && args[2] !== 'main') {
+        writeFileSync(
+          join(root, '.git', 'HEAD'),
+          `ref: refs/heads/${args[2]}\n`,
+          'utf8',
+        );
+      }
+      return '';
+    }
+    if (
+      args[0] === 'config' &&
+      ((args[1] === 'user.name' && args[2] === 'Test') ||
+        (args[1] === 'user.email' && args[2] === 'test@example.invalid')) &&
+      existsSync(join(root, '.git'))
+    ) {
+      return '';
+    }
     return execFileSync('git', args, {
       cwd: root,
       encoding: 'utf8',
@@ -2549,6 +2600,9 @@ test('fleet/overview active-plan parity, ci-check archive validation/exemption, 
     const dir = join(fleetRoot, name);
     mkdirSync(join(dir, 'scripts'), { recursive: true });
     copyFileSync(join(scripts, 'ticket.mjs'), join(dir, 'scripts/ticket.mjs'));
+    if (existsSync(join(scripts, 'lib'))) {
+      cpSync(join(scripts, 'lib'), join(dir, 'scripts/lib'), { recursive: true });
+    }
     writeFileSync(
       join(dir, 'scripts/ticket.config.json'),
       JSON.stringify({ ...defaultNotionConfig, tracker: 'local', ...cfg }, null, 2),
@@ -3166,7 +3220,8 @@ test('T1.5: runInvariants enforces mirrorDirs, readmeCliSync, zeroDependencies, 
       'new', 'prime', 'tick', 'defer', 'step', 'checkpoint', 'run', 'create', 'start',
       'log', 'handoff', 'resume', 'pack', 'review', 'check', 'lint', 'ship', 'pr', 'merge', 'done',
       'overview', 'hook', 'adr', 'exec', 'wt', 'recall', 'archive', 'doctor', 'verify',
-      'hygiene', 'switch', 'split', 'fleet', 'wave', 'lesson', 'stats', 'release',
+      'hygiene', 'switch', 'split', 'fleet', 'wave', 'lesson', 'stats', 'release', 'blueprint',
+      'ready', 'map',
     ].join(' '),
   );
   writeFileSync(join(f.root, 'package.json'), JSON.stringify({ name: 'test', dependencies: {} }));
@@ -4429,4 +4484,838 @@ if (process.env.ADW_ROLE === 'reviewer') {
   assert.equal(dryRunNoModels.status, 0, dryRunNoModels.stderr);
   assert.doesNotMatch(dryRunNoModels.stdout, /^Models:/m);
   assert.doesNotMatch(dryRunNoModels.stdout, /^Model:/m);
+});
+
+test('architecture blueprints: scaffold, list, new --blueprint, prime/step/pack surfacing, lint validation, and recall indexing', (t) => {
+  const f = fixture(
+    t,
+    'ticket: local://FO:FO-Plan-Test\nagent: Gemini\n',
+    [],
+    {
+      tracker: 'local',
+      agentic: { models: { planner: 'gemini-4-neon-medium', builder: 'gemini-4-hydrogen-medium', reviewer: 'gemini-4-neon-low', fixer: 'gemini-4-hydrogen-medium' } },
+      verify: { test: 'node -e "process.exit(0)"' },
+    },
+  );
+  f.git('init', '-b', 'feat/blueprint-test');
+  f.git('config', 'user.name', 'Test');
+  f.git('config', 'user.email', 'test@example.invalid');
+  f.git('add', '.');
+  f.git('commit', '-m', 'init');
+
+  // 1. Empty blueprint list prints helpful message
+  const emptyList = f.run('blueprint', [], [], { omitPlan: true });
+  assert.equal(emptyList.status, 0, emptyList.stderr);
+  assert.match(emptyList.stdout, /No architecture blueprints found/);
+
+  // 2. Scaffold blueprint with --version and plannerModel
+  const createBp = f.run('blueprint', ['Auth Architecture', '--version', '1.2.0'], [], { omitPlan: true });
+  assert.equal(createBp.status, 0, createBp.stderr);
+  const bpRel = 'docs/architecture/FO-Blueprint-Auth-Architecture.md';
+  const bpFull = join(f.root, bpRel);
+  assert.ok(existsSync(bpFull), 'blueprint file should exist');
+  const bpText = readFileSync(bpFull, 'utf8');
+  assert.match(bpText, /^title: Blueprint: Auth Architecture$/m);
+  assert.match(bpText, /^status: active$/m);
+  assert.match(bpText, /^version: 1\.2\.0$/m);
+  assert.match(bpText, /^plannerModel: gemini-4-neon-medium$/m);
+  assert.match(bpText, /^created: \d{4}-\d{2}-\d{2}$/m);
+  for (const heading of [
+    '## Goal & Non-Goals',
+    '## Architecture & Boundaries',
+    '## Contracts & Invariants',
+    '## PR Slice Breakdown',
+    '## Living Updates & ADRs',
+  ]) {
+    assert.ok(bpText.includes(heading), `missing section ${heading}`);
+  }
+
+  // 3. Duplicate guard and --force overwrite
+  const dupBp = f.run('blueprint', ['Auth Architecture'], [], { omitPlan: true });
+  assert.notEqual(dupBp.status, 0);
+  assert.match(dupBp.stderr, /already exists/);
+
+  const forceBp = f.run('blueprint', ['Auth Architecture', '--version', '1.3.0', '--force'], [], { omitPlan: true });
+  assert.equal(forceBp.status, 0, forceBp.stderr);
+  assert.match(readFileSync(bpFull, 'utf8'), /^version: 1\.3\.0$/m);
+
+  // 4. List blueprints (no args and explicit 'list', ignoring _ files)
+  writeFileSync(join(f.root, 'docs/architecture/_template.md'), '# Ignore\n');
+  for (const args of [[], ['list']]) {
+    const listRes = f.run('blueprint', args, [], { omitPlan: true });
+    assert.equal(listRes.status, 0, listRes.stderr);
+    assert.match(listRes.stdout, /FO-Blueprint-Auth-Architecture\.md/);
+    assert.match(listRes.stdout, /status: active/);
+    assert.match(listRes.stdout, /version: 1\.3\.0/);
+    assert.match(listRes.stdout, /Blueprint: Auth Architecture/);
+    assert.doesNotMatch(listRes.stdout, /_template\.md/);
+  }
+
+  // 5. new --blueprint (valid, custom --context, missing error, standalone unchanged)
+  const badNew = f.run('new', ['Bad Slice', '--blueprint', 'docs/architecture/missing.md'], [], { omitPlan: true });
+  assert.notEqual(badNew.status, 0);
+  assert.match(badNew.stderr, /blueprint not found/);
+
+  const childRes = f.run('new', ['Auth Slice', '--blueprint', bpRel], [], { omitPlan: true });
+  assert.equal(childRes.status, 0, childRes.stderr);
+  const childPlanFile = readdirSync(join(f.root, 'docs/plans')).find((n) => n.includes('Auth-Slice'));
+  assert.ok(childPlanFile, 'child plan should be created');
+  const childRel = `docs/plans/${childPlanFile}`;
+  const childText = readFileSync(join(f.root, childRel), 'utf8');
+  assert.match(childText, new RegExp(`^blueprint: ${bpRel}$`, 'm'));
+  assert.match(childText, new RegExp(`See architecture blueprint: \`${bpRel}\``));
+
+  const standaloneRes = f.run('new', ['Standalone Slice'], [], { omitPlan: true });
+  assert.equal(standaloneRes.status, 0, standaloneRes.stderr);
+  const standaloneFile = readdirSync(join(f.root, 'docs/plans')).find((n) => n.includes('Standalone-Slice'));
+  const standaloneText = readFileSync(join(f.root, 'docs/plans', standaloneFile), 'utf8');
+  assert.doesNotMatch(standaloneText, /^blueprint:/m);
+
+  // Remove extra plans so onePlan() resolves cleanly to a blueprint-linked plan
+  rmSync(join(f.root, 'docs/plans/FO-Plan-Test.plan.md'));
+  rmSync(join(f.root, 'docs/plans', standaloneFile));
+  // Fill required sections in child plan so lint passes
+  const filledChild = childText
+    .replace(/<2-3 sentences:[^>]*>/, 'Implement auth slice 1.')
+    .replace(/<Unresolved assumptions[^>]*>/, 'None')
+    .replace(/<Pre-mortem:[^>]*>/, 'None noted.')
+    .replace(/<What this plan deliberately[^>]*>/, 'None noted.')
+    .replace(/- \[ \] AC1: <Observable outcome>/, '- [ ] AC1: WHEN auth runs THE SYSTEM SHALL succeed')
+    .replace(/- \[ \] <Step> \(AC1\)/, '- [ ] Add auth handler (AC1)');
+  writeFileSync(join(f.root, childRel), filledChild);
+
+  // 6. prime, step (all roles + --json), and pack surface Blueprint:
+  const primeRes = f.run('prime', [], [], { omitPlan: true });
+  assert.equal(primeRes.status, 0, primeRes.stderr);
+  assert.match(primeRes.stdout, new RegExp(`^Blueprint: ${bpRel}$`, 'm'));
+
+  for (const role of ['planner', 'builder', 'fixer', 'reviewer']) {
+    const stepRes = f.run('step', ['--role', role], [], { omitPlan: true });
+    assert.equal(stepRes.status, 0, stepRes.stderr);
+    assert.match(stepRes.stdout, new RegExp(`^Blueprint: ${bpRel}$`, 'm'));
+    if (['builder', 'fixer', 'reviewer'].includes(role)) {
+      assert.match(stepRes.stdout, /contracts and invariants/i);
+    }
+  }
+  const stepJsonRes = f.run('step', ['--role', 'builder', '--json'], [], { omitPlan: true });
+  assert.equal(stepJsonRes.status, 0, stepJsonRes.stderr);
+  assert.equal(JSON.parse(stepJsonRes.stdout).blueprint, bpRel);
+
+  const packRes = f.run('pack', [], [], { omitPlan: true });
+  assert.equal(packRes.status, 0, packRes.stderr);
+  assert.match(packRes.stdout, new RegExp(`^Blueprint: ${bpRel}$`, 'm'));
+
+  // 7. lint passes with valid blueprint and fails on missing blueprint
+  const lintOk = f.run('lint', [childRel], [], { omitPlan: true });
+  assert.equal(lintOk.status, 0, lintOk.stderr);
+
+  writeFileSync(join(f.root, childRel), filledChild.replace(bpRel, 'docs/architecture/missing.md'));
+  const lintMissing = f.run('lint', [childRel], [], { omitPlan: true });
+  assert.notEqual(lintMissing.status, 0);
+  assert.match(lintMissing.stdout + lintMissing.stderr, /missing\.md/);
+
+  // 8. recall indexes docs/architecture/*.md as [Blueprint]
+  writeFileSync(bpFull, bpText + '\nUniqueBlueprintTokenForRecall\n');
+  const recallRes = f.run('recall', ['UniqueBlueprintTokenForRecall'], [], { omitPlan: true });
+  assert.equal(recallRes.status, 0, recallRes.stderr);
+  assert.match(recallRes.stdout, /\[Blueprint\] docs\/architecture\/FO-Blueprint-Auth-Architecture\.md/);
+});
+
+test('F1: cached git fixture, verify.fast, archive --merged [--fleet] [--dry-run], sync --ensure-invariants, and doctor dirty protected branch warning', (t) => {
+  const f = fixture(t, '', [], {
+    tracker: 'local',
+    requireReview: false,
+    verify: {
+      fast: 'node --check scripts/ticket.mjs',
+      test: 'node -e "process.exit(0)"',
+    },
+  });
+
+  // 1. Cached git fixture preserves pre-existing files on init -b and short-circuits default config calls
+  writeFileSync(join(f.root, 'pre-init.txt'), 'kept\n');
+  f.git('init', '-b', 'main');
+  f.git('config', 'user.name', 'Test');
+  f.git('config', 'user.email', 'test@example.invalid');
+  assert.equal(readFileSync(join(f.root, 'pre-init.txt'), 'utf8'), 'kept\n');
+  assert.equal(f.git('config', '--get', 'user.name'), 'Test');
+  assert.equal(f.git('config', '--get', 'user.email'), 'test@example.invalid');
+
+  // 2. verify --tier fast works and repo config + manifest have fast / invariants configured
+  const repoCfg = JSON.parse(readFileSync(join(scripts, 'ticket.config.json'), 'utf8'));
+  if (repoCfg.prefix === 'ADW') {
+    assert.equal(repoCfg.verify?.fast, 'node --check scripts/ticket.mjs');
+  }
+  const fixtureCfg = JSON.parse(readFileSync(join(f.root, 'scripts', 'ticket.config.json'), 'utf8'));
+  assert.equal(fixtureCfg.verify?.fast, 'node --check scripts/ticket.mjs');
+  const manifest = JSON.parse(readFileSync(join(scripts, 'workflow-manifest.json'), 'utf8'));
+  assert.ok(Array.isArray(manifest.starterConfig?.invariants?.noSecretsPatterns));
+  assert.ok(Array.isArray(manifest.starterConfig?.invariants?.excludePaths));
+
+  const fastVerify = f.run('verify', ['--tier', 'fast'], [], { omitPlan: true });
+  assert.equal(fastVerify.status, 0, fastVerify.stderr);
+
+  // 3. archive --merged [--dry-run] [--fleet]
+  const shippedClosed = join(f.root, 'docs/plans/FO-Plan-Shipped-Closed.plan.md');
+  const inProgressOpen = join(f.root, 'docs/plans/FO-Plan-Open.plan.md');
+  const mergedLocal = join(f.root, 'docs/plans/FO-Plan-Test.plan.md');
+  writeFileSync(
+    shippedClosed,
+    [
+      '---',
+      'title: Plan - Feature: Shipped Closed',
+      'ticket: https://www.notion.so/40a0b9c6786f817fab0ff2059ad410e3',
+      'status: shipped',
+      'completedAt: 2026-11-15',
+      '---',
+      '# Shipped Closed',
+      '',
+      '## Summary',
+      'Shipped and merged.',
+      '',
+      '## Acceptance criteria',
+      '- [x] AC1: Done verified: ok',
+      '',
+      '## Steps',
+      '- [x] Step 1',
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(
+    inProgressOpen,
+    [
+      '---',
+      'title: Plan - Feature: Open Work',
+      'ticket: local://FO:FO-Plan-Open',
+      'status: in-progress',
+      '---',
+      '# Open Work',
+      '',
+      '## Summary',
+      'Still working.',
+      '',
+      '## Acceptance criteria',
+      '- [ ] AC1: Pending',
+      '',
+      '## Steps',
+      '- [ ] Step 1',
+      '',
+    ].join('\n'),
+  );
+  writeFileSync(
+    mergedLocal,
+    [
+      '---',
+      'title: Plan - Feature: Local Merged',
+      'ticket: local://FO:FO-Plan-Test',
+      'status: in-progress',
+      'completedAt: 2026-11-10',
+      '---',
+      '# Local Merged',
+      '',
+      '## Summary',
+      'Merged to main.',
+      '',
+      '## Acceptance criteria',
+      '- [x] AC1: Works verified: ok',
+      '',
+      '## Steps',
+      '- [x] Step 1',
+      '',
+    ].join('\n'),
+  );
+
+  f.git('add', '.');
+  f.git('commit', '-m', 'commit plans on main');
+
+  // Dry-run previews without moving
+  const dryArchive = f.run('archive', ['--merged', '--dry-run'], [], { omitPlan: true });
+  assert.equal(dryArchive.status, 0, dryArchive.stderr);
+  assert.match(dryArchive.stdout, /\[dry-run\] Would archive: docs\/plans\/FO-Plan-Shipped-Closed\.plan\.md/);
+  assert.match(dryArchive.stdout, /\[dry-run\] Would archive: docs\/plans\/FO-Plan-Test\.plan\.md/);
+  assert.doesNotMatch(dryArchive.stdout, /FO-Plan-Open\.plan\.md/);
+  assert.ok(existsSync(shippedClosed));
+  assert.ok(existsSync(mergedLocal));
+
+  // Real archive --merged moves closed/merged plans and leaves open plan untouched
+  const realArchive = f.run('archive', ['--merged'], [], { omitPlan: true });
+  assert.equal(realArchive.status, 0, realArchive.stderr);
+  assert.ok(!existsSync(shippedClosed));
+  assert.ok(!existsSync(mergedLocal));
+  assert.ok(existsSync(join(f.root, 'docs/plans/archive/2026-11/FO-Plan-Shipped-Closed.plan.md')));
+  assert.ok(existsSync(join(f.root, 'docs/plans/archive/2026-11/FO-Plan-Test.plan.md')));
+  assert.ok(existsSync(inProgressOpen));
+
+  // 4. doctor warns when on a dirty protected branch (main has uncommitted changes)
+  const docDirty = f.run('doctor', [], [], { omitPlan: true });
+  assert.equal(docDirty.status, 0, docDirty.stderr);
+  assert.match(docDirty.stdout, /Warning:\s+Protected branch "main" has \d+ uncommitted file\(s\)/);
+
+  // 5. sync.mjs --ensure-invariants backfills starterConfig.invariants without causing --check --bundle-only drift
+  const targetRepo = mkdtempSync(join(tmpdir(), 'ticket-sync-inv-'));
+  t.after(() => rmSync(targetRepo, { recursive: true, force: true }));
+  const initSync = spawnSync(
+    process.execPath,
+    [join(scripts, 'sync.mjs'), targetRepo, '--init-prefix', 'TST'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(initSync.status, 0, initSync.stderr);
+
+  // Strip invariants from targetRepo's ticket.config.json to simulate an older downstream config
+  const targetCfgPath = join(targetRepo, 'scripts/ticket.config.json');
+  const strippedCfg = JSON.parse(readFileSync(targetCfgPath, 'utf8'));
+  delete strippedCfg.invariants;
+  writeFileSync(targetCfgPath, JSON.stringify(strippedCfg, null, 2) + '\n');
+
+  // --check --bundle-only must NOT report drift when invariants is missing
+  const bundleCheck = spawnSync(
+    process.execPath,
+    [join(scripts, 'sync.mjs'), targetRepo, '--check', '--bundle-only'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(bundleCheck.status, 0, bundleCheck.stdout + bundleCheck.stderr);
+
+  // --ensure-invariants backfills starterConfig.invariants
+  const backfillSync = spawnSync(
+    process.execPath,
+    [join(scripts, 'sync.mjs'), targetRepo, '--ensure-invariants'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(backfillSync.status, 0, backfillSync.stderr);
+  const backfilledCfg = JSON.parse(readFileSync(targetCfgPath, 'utf8'));
+  assert.deepEqual(backfilledCfg.invariants, manifest.starterConfig.invariants);
+});
+
+test('G1: hunk/most-recent escaped-defect precision, deduplicated auto-lessons on block->pass and Bug close-out, and recall across blueprints/docs', (t) => {
+  const f = fixture(t, '', [], {
+    tracker: 'local',
+    requireReview: false,
+    verifyCommand: 'node -e "process.exit(0)"',
+  });
+
+  const dayIso = (daysAgo) =>
+    new Date(Date.now() - daysAgo * 86400000).toISOString().slice(0, 10);
+
+  rmSync(join(f.root, 'docs/plans/FO-Plan-Test.plan.md'));
+  mkdirSync(join(f.root, 'src'), { recursive: true });
+  mkdirSync(join(f.root, 'docs/dev-workflow'), { recursive: true });
+  mkdirSync(join(f.root, 'docs/architecture'), { recursive: true });
+
+  // Create a 20-line shared file touched by >2 feature plans at distinct line ranges
+  const baseLines = Array.from({ length: 20 }, (_, i) => `export const line${i + 1} = ${i + 1};`);
+  writeFileSync(join(f.root, 'src/god.js'), baseLines.join('\n') + '\n');
+  writeFileSync(join(f.root, 'README.md'), '# Doc v0\n');
+  writeFileSync(join(f.root, 'Strings.resw'), '<root>v0</root>\n');
+
+  f.git('init', '-b', 'main');
+  f.git('config', 'user.name', 'Test');
+  f.git('config', 'user.email', 'test@example.invalid');
+  f.git('add', '.');
+  f.git('commit', '-m', 'chore: base', '--date', `${dayIso(12)}T10:00:00Z`);
+
+  const writeClosedPlan = (relPath, title, startedDaysAgo, completedDaysAgo) => {
+    const full = join(f.root, relPath);
+    mkdirSync(dirname(full), { recursive: true });
+    writeFileSync(
+      full,
+      [
+        '---',
+        `title: ${title}`,
+        `ticket: local://FO:${basename(relPath, '.plan.md')}`,
+        'status: done',
+        `startedAt: ${dayIso(startedDaysAgo)}`,
+        `completedAt: ${dayIso(completedDaysAgo)}`,
+        '---',
+        `# ${title}`,
+        '',
+        '## Summary',
+        `Summary for ${title}.`,
+        '',
+        '## Acceptance criteria',
+        '- [x] AC1: Works verified: test',
+        '',
+        '## Steps',
+        '- [x] Step 1',
+        '',
+      ].join('\n'),
+    );
+  };
+
+  // Feat1 touches line 2 of src/god.js + noise files
+  const lines1 = [...baseLines];
+  lines1[1] = 'export const line2 = 200;';
+  writeFileSync(join(f.root, 'src/god.js'), lines1.join('\n') + '\n');
+  writeFileSync(join(f.root, 'README.md'), '# Doc v1\n');
+  writeClosedPlan('docs/plans/FO-Plan-Feat1.plan.md', 'Plan - Feature: Feat 1', 11, 10);
+  f.git('add', '.');
+  f.git('commit', '-m', 'feat: Feat 1', '--date', `${dayIso(10)}T12:00:00Z`);
+
+  // Feat2 touches line 10 of src/god.js
+  const lines2 = [...lines1];
+  lines2[9] = 'export const line10 = 1000;';
+  writeFileSync(join(f.root, 'src/god.js'), lines2.join('\n') + '\n');
+  writeClosedPlan('docs/plans/FO-Plan-Feat2.plan.md', 'Plan - Feature: Feat 2', 9, 8);
+  f.git('add', '.');
+  f.git('commit', '-m', 'feat: Feat 2', '--date', `${dayIso(8)}T12:00:00Z`);
+
+  // Feat3 touches line 19 of src/god.js (unrelated hunk to line 10!)
+  const lines3 = [...lines2];
+  lines3[18] = 'export const line19 = 1900;';
+  writeFileSync(join(f.root, 'src/god.js'), lines3.join('\n') + '\n');
+  writeClosedPlan('docs/plans/FO-Plan-Feat3.plan.md', 'Plan - Feature: Feat 3', 7, 6);
+  f.git('add', '.');
+  f.git('commit', '-m', 'feat: Feat 3', '--date', `${dayIso(6)}T12:00:00Z`);
+
+  // Bug1 fixes line 10 of src/god.js (should attribute to Feat2 by hunk overlap, NOT Feat3 or Feat1!)
+  const linesBug = [...lines3];
+  linesBug[9] = 'export const line10 = 1001;';
+  writeFileSync(join(f.root, 'src/god.js'), linesBug.join('\n') + '\n');
+  writeFileSync(join(f.root, 'README.md'), '# Doc v2\n');
+  writeFileSync(join(f.root, 'Strings.resw'), '<root>v2</root>\n');
+  const bugPlanRel = 'docs/plans/FO-Plan-Bug1.plan.md';
+  writeFileSync(
+    join(f.root, bugPlanRel),
+    [
+      '---',
+      'title: Debug - Bug: Fix Line 10 Overflow',
+      'ticket: local://FO:FO-Plan-Bug1',
+      'status: in-progress',
+      `startedAt: ${dayIso(3)}`,
+      '---',
+      '# Fix Line 10 Overflow',
+      '',
+      '## Summary',
+      'Guard line 10 against integer overflow in shared module.',
+      '',
+      '## Acceptance criteria',
+      '- [x] AC1: No overflow verified: test',
+      '',
+      '## Steps',
+      '- [x] Fix line 10',
+      '',
+    ].join('\n'),
+  );
+  f.git('add', '.');
+  f.git('commit', '-m', 'fix: Fix Line 10 Overflow', '--date', `${dayIso(3)}T12:00:00Z`);
+
+  // 1. Verify stats attributes Bug1 ONLY to Feat2 (hunk match on line 10, noise files README.md/Strings.resw ignored)
+  const statsRes = f.run('stats', ['--json'], [], { omitPlan: true });
+  assert.equal(statsRes.status, 0, statsRes.stderr);
+  const statsData = JSON.parse(statsRes.stdout);
+  assert.equal(statsData.escapedDefects.length, 1);
+  assert.equal(statsData.escapedDefects[0].sourcePlan, 'docs/plans/FO-Plan-Feat2.plan.md');
+  assert.equal(statsData.escapedDefects[0].defectRef, bugPlanRel);
+  assert.deepEqual(statsData.escapedDefects[0].overlappingFiles, ['src/god.js']);
+
+  // 2. Auto-lesson on review block -> pass + deduplication
+  const blockRes = f.run('review', [
+    bugPlanRel,
+    '--agent',
+    'Codex',
+    '--verdict',
+    'block',
+    '--summary',
+    'Missing negative boundary check',
+  ], [], { omitPlan: true });
+  assert.equal(blockRes.status, 0, blockRes.stderr);
+
+  const passRes = f.run('review', [
+    bugPlanRel,
+    '--agent',
+    'Codex',
+    '--verdict',
+    'pass',
+    '--summary',
+    'Added negative boundary check and unit test',
+  ], [], { omitPlan: true });
+  assert.equal(passRes.status, 0, passRes.stderr);
+
+  const lessonsPath = join(f.root, 'docs/lessons.md');
+  assert.ok(existsSync(lessonsPath), 'docs/lessons.md should be auto-created on block->pass');
+  const afterReviewLessons = readFileSync(lessonsPath, 'utf8');
+  assert.match(afterReviewLessons, /review-blocker · docs\/plans\/FO-Plan-Bug1\.plan\.md \| Resolved review blocker \(Missing negative boundary check\): Added negative boundary check and unit test/);
+
+  // Re-stamping the same pass review does not duplicate the lesson
+  const passDup = f.run('review', [
+    bugPlanRel,
+    '--agent',
+    'Codex',
+    '--verdict',
+    'pass',
+    '--summary',
+    'Added negative boundary check and unit test',
+  ], [], { omitPlan: true });
+  assert.equal(passDup.status, 0, passDup.stderr);
+  assert.equal(readFileSync(lessonsPath, 'utf8'), afterReviewLessons);
+
+  // 3. Auto-lesson on Bug plan close-out (done / ship) + deduplication
+  const doneRes = f.run('done', [bugPlanRel], [], { omitPlan: true });
+  assert.equal(doneRes.status, 0, doneRes.stderr);
+  const afterDoneLessons = readFileSync(lessonsPath, 'utf8');
+  assert.match(afterDoneLessons, /bug-fix · docs\/plans\/FO-Plan-Bug1\.plan\.md \| Guard line 10 against integer overflow in shared module\./);
+
+  // Re-running done does not duplicate the bug-fix lesson
+  const doneDup = f.run('done', [bugPlanRel], [], { omitPlan: true });
+  assert.equal(doneDup.status, 0, doneDup.stderr);
+  assert.equal(readFileSync(lessonsPath, 'utf8'), afterDoneLessons);
+
+  // 4. recall searches docs/dev-workflow/ ([Doc]) and docs/architecture/ ([Blueprint])
+  writeFileSync(
+    join(f.root, 'docs/dev-workflow/setup-guide.md'),
+    '# Setup Guide\n\nUse UniqueWorkflowDocToken for multi-repo sync.\n',
+  );
+  writeFileSync(
+    join(f.root, 'docs/architecture/FO-Blueprint-Core.md'),
+    '# Core Blueprint\n\nUse UniqueArchBlueprintToken for system boundaries.\n',
+  );
+
+  const recallDoc = f.run('recall', ['UniqueWorkflowDocToken'], [], { omitPlan: true });
+  assert.equal(recallDoc.status, 0, recallDoc.stderr);
+  assert.match(recallDoc.stdout, /\[Doc\] docs\/dev-workflow\/setup-guide\.md/);
+
+  const recallBp = f.run('recall', ['UniqueArchBlueprintToken'], [], { omitPlan: true });
+  assert.equal(recallBp.status, 0, recallBp.stderr);
+  assert.match(recallBp.stdout, /\[Blueprint\] docs\/architecture\/FO-Blueprint-Core\.md/);
+});
+
+test('H1: dependsOn lint/resolution, ready --claim/--release, blueprint status, wave dependency gating, and map symbol outline', (t) => {
+  const f = fixture(t, '', [], {
+    tracker: 'local',
+    requireReview: false,
+  });
+
+  rmSync(join(f.root, 'docs/plans/FO-Plan-Test.plan.md'));
+  mkdirSync(join(f.root, 'src'), { recursive: true });
+  writeFileSync(
+    join(f.root, 'src/service.js'),
+    [
+      'export class AuthService {',
+      '  login() {}',
+      '}',
+      'export async function verifyToken(token) {',
+      '  return Boolean(token);',
+      '}',
+      'export const DEFAULT_TTL = 3600;',
+    ].join('\n') + '\n',
+  );
+
+  f.git('init', '-b', 'main');
+  f.git('config', 'user.name', 'Test');
+  f.git('config', 'user.email', 'test@example.invalid');
+
+  // 1. Scaffold blueprint and 2 dependent plans (Plan B depends on Plan A)
+  const bpCreate = f.run('blueprint', ['Next Gen Auth'], [], { omitPlan: true });
+  assert.equal(bpCreate.status, 0, bpCreate.stderr);
+  const bpRel = 'docs/architecture/FO-Blueprint-Next-Gen-Auth.md';
+
+  const newA = f.run(
+    'new',
+    [
+      'Slice A Base',
+      '--blueprint',
+      bpRel,
+      '--priority',
+      'high',
+      '--summary',
+      'Base auth slice.',
+      '--criteria',
+      'AC1: Base works',
+      '--steps',
+      'Build base (AC1)',
+      '--create',
+      '--agent',
+      'Gemini',
+    ],
+    [],
+    { omitPlan: true },
+  );
+  assert.equal(newA.status, 0, newA.stderr);
+  const planAFile = readdirSync(join(f.root, 'docs/plans')).find((n) => n.includes('Slice-A-Base'));
+  const planARel = `docs/plans/${planAFile}`;
+
+  const newB = f.run(
+    'new',
+    [
+      'Slice B Dependent',
+      '--blueprint',
+      bpRel,
+      '--depends-on',
+      planAFile,
+      '--summary',
+      'Dependent auth slice.',
+      '--criteria',
+      'AC1: Dependent works',
+      '--steps',
+      'Build dependent (AC1)',
+      '--create',
+      '--agent',
+      'Gemini',
+    ],
+    [],
+    { omitPlan: true },
+  );
+  assert.equal(newB.status, 0, newB.stderr);
+  const planBFile = readdirSync(join(f.root, 'docs/plans')).find((n) => n.includes('Slice-B-Dependent'));
+  const planBRel = `docs/plans/${planBFile}`;
+
+  f.git('add', '.');
+  f.git('commit', '-m', 'chore: add blueprint and plans A & B');
+
+  // 2. lint flags missing and circular dependencies
+  const planBFull = join(f.root, planBRel);
+  const planBOrig = readFileSync(planBFull, 'utf8');
+  writeFileSync(
+    planBFull,
+    planBOrig.replace(`dependsOn: ${planAFile}`, 'dependsOn: FO-Plan-DoesNotExist.plan.md'),
+  );
+  const lintMissing = f.run('lint', [planBRel], [], { omitPlan: true });
+  assert.notEqual(lintMissing.status, 0);
+  assert.match(lintMissing.stdout + lintMissing.stderr, /dependsOn references missing plan/);
+
+  // Create circular dependency A <-> B
+  const planAFull = join(f.root, planARel);
+  const planAOrig = readFileSync(planAFull, 'utf8');
+  writeFileSync(planBFull, planBOrig);
+  writeFileSync(
+    planAFull,
+    planAOrig.replace(/\n---\n/, `\ndependsOn: ${planBFile}\n---\n`),
+  );
+  const lintCycle = f.run('lint', [planARel], [], { omitPlan: true });
+  assert.notEqual(lintCycle.status, 0);
+  assert.match(lintCycle.stdout + lintCycle.stderr, /circular dependency/i);
+  writeFileSync(planAFull, planAOrig);
+
+  // 3. ready queue lists Plan A as ready and Plan B as blocked
+  const ready1 = f.run('ready', ['--blueprint', bpRel, '--json'], [], { omitPlan: true });
+  assert.equal(ready1.status, 0, ready1.stderr);
+  const q1 = JSON.parse(ready1.stdout);
+  assert.equal(q1.ready.length, 1);
+  assert.equal(q1.ready[0].plan, planARel);
+  assert.equal(q1.blocked.length, 1);
+  assert.equal(q1.blocked[0].plan, planBRel);
+
+  // 4. ready --claim stamps claimedBy/claimedAt on Plan A; another agent sees it as claimed
+  const claimRes = f.run('ready', ['--claim', '--agent', 'Gemini', '--json'], [], { omitPlan: true });
+  assert.equal(claimRes.status, 0, claimRes.stderr);
+  const claimData = JSON.parse(claimRes.stdout);
+  assert.equal(claimData.claimed, planARel);
+  assert.equal(claimData.claimedBy, 'Gemini');
+
+  const readyOther = f.run('ready', ['--agent', 'Codex', '--json'], [], { omitPlan: true });
+  assert.equal(readyOther.status, 0, readyOther.stderr);
+  const qOther = JSON.parse(readyOther.stdout);
+  assert.equal(qOther.ready.length, 0);
+  assert.equal(qOther.claimed.length, 1);
+  assert.equal(qOther.claimed[0].claimedBy, 'Gemini');
+
+  // Release claim on Plan A
+  const releaseRes = f.run('ready', ['--release', planARel], [], { omitPlan: true });
+  assert.equal(releaseRes.status, 0, releaseRes.stderr);
+  assert.doesNotMatch(readFileSync(planAFull, 'utf8'), /^claimedBy:/m);
+
+  // 5. wave --spawn --dry-run skips blocked Plan B and only targets Plan A
+  const waveDry = f.run('wave', ['--spawn', '--dry-run'], [], { omitPlan: true });
+  assert.equal(waveDry.status, 0, waveDry.stderr);
+  assert.match(waveDry.stdout, /Skipping docs\/plans\/FO-Plan-Slice-B-Dependent.*\[blocked by:/);
+  assert.match(waveDry.stdout, /\[dry-run\] 1 worktree target\(s\)/);
+
+  // 6. blueprint status reports 0 done, 1 ready, 1 blocked
+  const bpStatus1 = f.run('blueprint', ['status', bpRel, '--json'], [], { omitPlan: true });
+  assert.equal(bpStatus1.status, 0, bpStatus1.stderr);
+  const bps1 = JSON.parse(bpStatus1.stdout);
+  assert.equal(bps1.counts.total, 2);
+  assert.equal(bps1.counts.ready, 1);
+  assert.equal(bps1.counts.blocked, 1);
+  assert.equal(bps1.counts.done, 0);
+
+  // Complete Plan A -> Plan B becomes ready!
+  assert.equal(
+    f.run('tick', [planARel, '1', '--verified', 'unit test'], [], { omitPlan: true }).status,
+    0,
+  );
+  assert.equal(
+    f.run('tick', [planARel, '1', '--verified', 'done'], [], { omitPlan: true }).status,
+    0,
+  );
+  assert.equal(f.run('done', [planARel], [], { omitPlan: true }).status, 0);
+
+  const ready2 = f.run('ready', ['--json'], [], { omitPlan: true });
+  assert.equal(ready2.status, 0, ready2.stderr);
+  const q2 = JSON.parse(ready2.stdout);
+  assert.equal(q2.ready.length, 1);
+  assert.equal(q2.ready[0].plan, planBRel);
+  assert.equal(q2.blocked.length, 0);
+
+  const bpStatus2 = f.run('blueprint', ['status', bpRel], [], { omitPlan: true });
+  assert.equal(bpStatus2.status, 0, bpStatus2.stderr);
+  assert.match(bpStatus2.stdout, /Slices: 2 total \(done: 1, in-progress: 0, ready: 1, blocked: 0\)/);
+  assert.match(bpStatus2.stdout, /\[deps satisfied:/);
+
+  // 7. map extracts symbols from src/service.js and scripts/ticket.mjs
+  const mapJson = f.run('map', ['src/service.js', '--json'], [], { omitPlan: true });
+  assert.equal(mapJson.status, 0, mapJson.stderr);
+  const mapData = JSON.parse(mapJson.stdout);
+  assert.equal(mapData.shownFiles, 1);
+  assert.equal(mapData.files[0].file, 'src/service.js');
+  const symNames = mapData.files[0].symbols.map((s) => s.name);
+  assert.ok(symNames.includes('AuthService'));
+  assert.ok(symNames.includes('verifyToken'));
+  assert.ok(symNames.includes('DEFAULT_TTL'));
+
+  const mapText = f.run('map', ['ticket.mjs', '--max', '1'], [], { omitPlan: true });
+  assert.equal(mapText.status, 0, mapText.stderr);
+  assert.match(mapText.stdout, /scripts\/ticket\.mjs/);
+  assert.match(mapText.stdout, /\[command\] commands\.ready/);
+  assert.match(mapText.stdout, /\[command\] commands\.map/);
+});
+
+test('I1: characterization of scripts/lib/* ESM modules, command surface parity, and sync --check --bundle-only', async (t) => {
+  const mdLib = await import('./lib/markdown-plan.mjs');
+  const invLib = await import('./lib/invariants-lint.mjs');
+  const statsLib = await import('./lib/stats-lessons.mjs');
+  const symLib = await import('./lib/symbols-map.mjs');
+
+  // 1. markdown-plan.mjs exports & behavior
+  const sampleDoc = '---\ntitle: Plan - Feature: Lib\n---\n# Lib\n\n## Summary\nHello lib.\n\n## Open questions\n- [ ] Question 1?\n\n## Acceptance criteria\n- [ ] AC1: First\n- [x] AC2: Second verified: ok\n';
+  const body = mdLib.bodyOf(sampleDoc);
+  assert.equal(mdLib.section(body, 'Summary'), 'Hello lib.');
+  assert.equal(mdLib.countOpenQuestions(body), 1);
+  const appended = mdLib.appendToSection(body, 'Summary', 'More text.');
+  assert.match(mdLib.section(appended, 'Summary'), /Hello lib\.[\s\S]*More text\./);
+  const cbs = mdLib.findCheckboxes(body);
+  assert.equal(cbs.items.length, 3);
+  assert.equal(mdLib.missingCheckboxes(body, body).length, 0);
+
+  // 2. invariants-lint.mjs exports & behavior
+  assert.equal(invLib.isTestFile('scripts/ticket.test.mjs'), true);
+  assert.equal(invLib.isTestFile('scripts/ticket.mjs'), false);
+  assert.equal(invLib.isIgnoredDiffPath('pnpm-lock.yaml', ['pnpm-lock.yaml', '*.min.js']), true);
+  assert.equal(invLib.isIgnoredDiffPath('bundle.min.js', ['pnpm-lock.yaml', '*.min.js']), true);
+  assert.equal(invLib.tailLines('a\nb\nc\n', 2), 'b\nc');
+  assert.equal(invLib.percentile([1, 2, 3, 4], 0.5), 2.5);
+  assert.equal(invLib.round1(1.26), 1.3);
+
+  // 3. stats-lessons.mjs exports & behavior
+  assert.equal(statsLib.parsePlanTypeFromMeta({ title: 'Plan - Refactor: Clean' }), 'Refactor');
+  assert.equal(statsLib.parsePlanTypeFromMeta({ title: 'Debug - Bug: Crash' }), 'Bug');
+  assert.ok(Number.isFinite(statsLib.parseIsoDayOrMs('2026-11-23')));
+  assert.equal(statsLib.isNoiseFileForDefects('README.md'), true);
+  assert.equal(statsLib.isNoiseFileForDefects('Strings.resw'), true);
+  assert.equal(statsLib.isNoiseFileForDefects('src/core.js'), false);
+  assert.equal(statsLib.rangesOverlap([[10, 20]], [[15, 25]]), true);
+  assert.equal(statsLib.rangesOverlap([[10, 12]], [[20, 25]]), false);
+
+  // 4. symbols-map.mjs exports & behavior
+  assert.deepEqual(
+    symLib.parseDependsOn({ meta: { dependsOn: 'PlanA.plan.md, PlanB.plan.md | ADW:KeyC' } }),
+    ['PlanA.plan.md', 'PlanB.plan.md', 'ADW:KeyC'],
+  );
+  const libMap = symLib.collectRepoSymbolMap(dirname(scripts), { filter: 'scripts/lib/' });
+  assert.equal(libMap.shownFiles, 4);
+
+  // 5. workflow-manifest.json and sync.mjs --check --bundle-only .
+  const manifest = JSON.parse(readFileSync(join(scripts, 'workflow-manifest.json'), 'utf8'));
+  for (const modPath of [
+    'scripts/lib/markdown-plan.mjs',
+    'scripts/lib/invariants-lint.mjs',
+    'scripts/lib/stats-lessons.mjs',
+    'scripts/lib/symbols-map.mjs',
+  ]) {
+    assert.ok(manifest.copy.includes(modPath), `manifest.copy missing ${modPath}`);
+  }
+
+  const syncRes = spawnSync(
+    process.execPath,
+    [join(scripts, 'sync.mjs'), dirname(scripts), '--check', '--bundle-only'],
+    { encoding: 'utf8' },
+  );
+  assert.equal(syncRes.status, 0, syncRes.stdout + syncRes.stderr);
+});
+
+test('J1: Spike plan type scaffolding, timebox/appetite defaults, Hypothesis lint, and stats classification', (t) => {
+  const f = fixture(t, '', [], { tracker: 'local', requireReview: false });
+  rmSync(f.plan);
+
+  // 1. new --type Spike --timebox 4h defaults appetite to S and adds Hypothesis + Findings sections
+  const spikeNew = f.run(
+    'new',
+    ['Eval Cache', '--type', 'Spike', '--timebox', '4h'],
+    [],
+    { omitPlan: true },
+  );
+  assert.equal(spikeNew.status, 0, spikeNew.stderr);
+  const createdFile = readdirSync(join(f.root, 'docs/plans')).find((n) =>
+    n.includes('Eval-Cache'),
+  );
+  assert.ok(createdFile, 'expected Spike plan file');
+  const relPath = `docs/plans/${createdFile}`;
+  const fullPath = join(f.root, relPath);
+  const spikeText = readFileSync(fullPath, 'utf8');
+  assert.match(spikeText, /^title: Plan - Spike: Eval Cache$/m);
+  assert.match(spikeText, /^appetite: S$/m);
+  assert.match(spikeText, /^timebox: 4h$/m);
+  assert.match(spikeText, /^## Hypothesis$/m);
+  assert.match(spikeText, /^## Findings & Recommendation$/m);
+  assert.match(spikeText, /within 4h budget/);
+  assert.match(spikeText, /Documented answer and go\/no-go recommendation/);
+
+  // 2. lint rejects placeholder Hypothesis and warns when appetite is L
+  const lintFail = f.run('lint', [relPath], [], { omitPlan: true });
+  assert.notEqual(lintFail.status, 0);
+  assert.match(lintFail.stderr + lintFail.stdout, /Hypothesis.*placeholder/);
+
+  const populated = spikeText
+    .replace('appetite: S', 'appetite: L')
+    .replace(/<2-3 sentences:[^>]*>/, 'Evaluate cache latency vs memory.')
+    .replace(/<Compacted research:[^>]*>/, 'Benchmarked local LRU.')
+    .replace(/<Unresolved assumptions[^>]*>/, 'None')
+    .replace(/<Hypothesis:[^>]*>/, 'LRU cache reduces repeat reads below 5ms.')
+    .replace(/<Pre-mortem:[^>]*>/, 'Prototype discarded if p95 exceeds 10ms.')
+    .replace(/<What this plan deliberately[^>]*>/, 'Production rollout.');
+  writeFileSync(fullPath, populated);
+
+  const lintWarn = f.run('lint', [relPath, '--json'], [], { omitPlan: true });
+  assert.equal(lintWarn.status, 0, lintWarn.stderr);
+  const warnParsed = JSON.parse(lintWarn.stdout);
+  assert.ok(
+    warnParsed.warnings.some((w) => /Spike plans should be time-boxed with appetite S or M/.test(w)),
+    `Expected Spike appetite warning, got: ${JSON.stringify(warnParsed.warnings)}`,
+  );
+
+  // Fixing appetite -> lint --strict passes cleanly
+  writeFileSync(fullPath, populated.replace('appetite: L', 'appetite: S'));
+  const lintClean = f.run('lint', [relPath, '--strict'], [], { omitPlan: true });
+  assert.equal(lintClean.status, 0, lintClean.stderr);
+
+  // 3. stats classifies Spike under byType.Spike
+  const statsRes = f.run('stats', ['--json'], [], { omitPlan: true });
+  assert.equal(statsRes.status, 0, statsRes.stderr);
+  const stats = JSON.parse(statsRes.stdout);
+  assert.equal(stats.byType.Spike, 1);
+  assert.equal(stats.escapedDefects.length, 0);
+});
+
+test('listFilesRel traverses directory junctions/symlinks without EISDIR', async (t) => {
+  const { listFilesRel } = await import('./lib/invariants-lint.mjs');
+  const f = fixture(t, 'ticket: local://FO:FO-Plan-Test\n', [], {
+    tracker: 'local',
+    requireReview: false,
+    invariants: {
+      mirrorDirs: [['.agents/skills', '.claude/skills']],
+    },
+  });
+
+  const targetSkill = join(f.root, '.agents/skills/ext-skill');
+  mkdirSync(targetSkill, { recursive: true });
+  writeFileSync(join(targetSkill, 'SKILL.md'), 'same content\n');
+  mkdirSync(join(f.root, '.claude/skills'), { recursive: true });
+  symlinkSync(
+    targetSkill,
+    join(f.root, '.claude/skills/ext-skill'),
+    process.platform === 'win32' ? 'junction' : 'dir',
+  );
+
+  assert.deepEqual(listFilesRel(join(f.root, '.claude/skills')), ['ext-skill/SKILL.md']);
+
+  const checkRes = f.run('check');
+  assert.equal(checkRes.status, 0, checkRes.stderr);
 });

@@ -41,6 +41,7 @@ const opts = {
   check: false,
   bundleOnly: false,
   dryRun: false,
+  ensureInvariants: false,
   initPrefix: '',
   remote: false,
   upstream: 'AaronPG095/AI-Dev-Workflow',
@@ -52,6 +53,7 @@ for (let i = 0; i < args.length; i++) {
   else if (a === '--check' || a === '-Check') opts.check = true;
   else if (a === '--bundle-only') opts.bundleOnly = true;
   else if (a === '--dry-run' || a === '-DryRun') opts.dryRun = true;
+  else if (a === '--ensure-invariants' || a === '-EnsureInvariants') opts.ensureInvariants = true;
   else if (a === '--remote' || a === '-Remote') opts.remote = true;
   else if (a === '--upstream' || a === '-Upstream') opts.upstream = args[++i] || opts.upstream;
   else if (a === '--branch' || a === '-Branch') opts.branch = args[++i] || opts.branch;
@@ -244,7 +246,12 @@ async function sync() {
       updates.push({ repoName, path, destination, text: expected + '\n', missing: current === null });
     }
 
-    if (!configExists) compare('scripts/ticket.config.json', JSON.stringify(cfg, null, 2));
+    if (!configExists) {
+      compare('scripts/ticket.config.json', JSON.stringify(cfg, null, 2));
+    } else if (opts.ensureInvariants && !cfg.invariants) {
+      cfg.invariants = manifest.starterConfig.invariants;
+      compare('scripts/ticket.config.json', JSON.stringify(cfg, null, 2));
+    }
     for (const path of manifest.copy) compare(path, files.get(path));
     const canonicalSelf = opts.bundleOnly && !opts.remote && repo === workflowRoot;
     for (const path of manifest.prefix)

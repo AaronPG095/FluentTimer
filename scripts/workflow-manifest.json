@@ -3,6 +3,10 @@
   "copy": [
     "scripts/workflow-manifest.json",
     "scripts/ticket.mjs",
+    "scripts/lib/markdown-plan.mjs",
+    "scripts/lib/invariants-lint.mjs",
+    "scripts/lib/stats-lessons.mjs",
+    "scripts/lib/symbols-map.mjs",
     "scripts/ticket.test.mjs",
     "scripts/hooks/adw-hook.mjs",
     "scripts/sync.mjs",
@@ -52,7 +56,14 @@
     "requireReview": true,
     "allowSelfReview": false,
     "invariants": {
-      "mirrorDirs": [[".agents/skills", ".claude/skills"]]
+      "mirrorDirs": [[".agents/skills", ".claude/skills"]],
+      "noSecretsPatterns": [
+        "\\bntn_[A-Za-z0-9]{10,}",
+        "\\bsecret_[A-Za-z0-9]{10,}",
+        "\\bghp_[A-Za-z0-9]{20,}",
+        "\\bgithub_pat_[A-Za-z0-9_]{20,}"
+      ],
+      "excludePaths": ["scripts/ticket.test.mjs", "scripts/ticket.config.json"]
     },
     "appetite": {
       "S": { "maxLines": 150, "maxFiles": 5 },
