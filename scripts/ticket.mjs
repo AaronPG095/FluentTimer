@@ -41,6 +41,34 @@ import { fileURLToPath } from 'node:url';
 import { execFileSync, execSync, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
+import {
+  section,
+  appendToSection,
+  findCheckboxes,
+  findRunnerTarget,
+  countOpenQuestions,
+  missingCheckboxes,
+  bodyOf,
+} from './lib/markdown-plan.mjs';
+import {
+  listFilesRel,
+  isTestFile as isTestFileBase,
+  isIgnoredDiffPath,
+  tailLines,
+  percentile,
+  round1,
+} from './lib/invariants-lint.mjs';
+import {
+  loadLessons as loadLessonsBase,
+  parsePlanTypeFromMeta,
+  parseIsoDayOrMs,
+  isNoiseFileForDefects as isNoiseFileForDefectsBase,
+  rangesOverlap,
+} from './lib/stats-lessons.mjs';
+import {
+  parseDependsOn,
+  collectRepoSymbolMap as collectRepoSymbolMapBase,
+} from './lib/symbols-map.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const repoRoot = resolve(here, '..');
@@ -100,6 +128,10 @@ const WORKFLOW_FILES = new Set([
   'scripts/workflow-manifest.json',
   '.github/workflows/ci.yml',
   'scripts/ticket.mjs',
+  'scripts/lib/markdown-plan.mjs',
+  'scripts/lib/invariants-lint.mjs',
+  'scripts/lib/stats-lessons.mjs',
+  'scripts/lib/symbols-map.mjs',
   'scripts/ticket.test.mjs',
   'scripts/hooks/adw-hook.mjs',
   'scripts/ticket.config.json',
@@ -137,6 +169,7 @@ const BOOLEAN_FLAGS = new Set([
   '--fleet',
   '--auto',
   '--all',
+  '--all-overlaps',
   '--verify',
   '--force',
   '--create',
@@ -160,8 +193,11 @@ const BOOLEAN_FLAGS = new Set([
   '--pre-push',
   '--squash',
   '--merge',
+  '--merged',
   '--rebase',
   '--keep-branch',
+  '--claim',
+  '--release',
 ]);
 for (let i = 0; i < rest.length; i++) {
   const a = rest[i];
@@ -367,19 +403,6 @@ function writePlan(plan) {
   );
 }
 
-function section(body, heading) {
-  const out = [];
-  let on = false;
-  for (const line of body.split('\n')) {
-    if (/^## /.test(line)) {
-      on = line.slice(3).trim().toLowerCase() === heading.toLowerCase();
-      continue;
-    }
-    if (on) out.push(line);
-  }
-  return out.join('\n').trim();
-}
-
 function problems(plan, { requireTicket = true, ignoreReview = false, base, head, dir = repoRoot } = {}) {
   const found = [];
   if (!plan.meta.title || plan.meta.title.startsWith('<'))
@@ -480,35 +503,11 @@ function problems(plan, { requireTicket = true, ignoreReview = false, base, head
   return found;
 }
 
-function missingCheckboxes(original, candidate) {
-  const identity = (item) => JSON.stringify([
-    item.section.toLowerCase(),
-    item.text.replace(/\s+(?:verified(?:\((?:test|cmd|manual|inspect)\))?|deferred):.*$/i, '').trim(),
-  ]);
-  const remaining = new Map();
-  for (const item of findCheckboxes(candidate).items) {
-    const key = identity(item);
-    remaining.set(key, (remaining.get(key) || 0) + 1);
-  }
-  return findCheckboxes(original).items.filter((item) => {
-    const key = identity(item);
-    const count = remaining.get(key) || 0;
-    if (!count) return true;
-    remaining.set(key, count - 1);
-    return false;
-  });
-}
 const deferredItems = (body) =>
   body
     .split('\n')
     .filter((l) => /^\s*- \[ \]/.test(l) && /deferred:/i.test(l))
     .map((l) => l.trim());
-
-function bodyOf(text) {
-  const norm = text.replace(/\r\n/g, '\n');
-  const m = norm.match(/^---\n[\s\S]*?\n---\n/);
-  return m ? norm.slice(m[0].length) : norm;
-}
 
 function git(args, { allowFail = false, trim = true, cwd = repoRoot, maxBuffer } = {}) {
   try {
@@ -545,24 +544,6 @@ function originalPlan(file, base, head) {
     .filter(Boolean)
     .pop();
   return first ? git(['show', `${first}:${file}`]) : null;
-}
-
-function countOpenQuestions(body) {
-  const raw = section(body, 'Open questions');
-  if (!raw) return 0;
-  return raw
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(
-      (l) =>
-        l &&
-        !l.startsWith('<!--') &&
-        !l.endsWith('-->') &&
-        !/^<[^>]+>$/.test(l) &&
-        !/^(?:\(none\)|none\.?)$/i.test(l) &&
-        !/^- \[[xX]\]/.test(l),
-    )
-    .filter((l) => /^- /.test(l) || /\?$/.test(l)).length;
 }
 
 function checkAppetite(plan, base, head, dir = repoRoot) {
@@ -612,17 +593,6 @@ function checkAppetite(plan, base, head, dir = repoRoot) {
     maxLines: limits.maxLines,
     exceeded: files > limits.maxFiles || lines > limits.maxLines,
   };
-}
-
-function listFilesRel(rootDir, baseDir = rootDir) {
-  if (!existsSync(rootDir)) return [];
-  const out = [];
-  for (const entry of readdirSync(rootDir, { withFileTypes: true })) {
-    const full = join(rootDir, entry.name);
-    if (entry.isDirectory()) out.push(...listFilesRel(full, baseDir));
-    else out.push(relative(baseDir, full).replace(/\\/g, '/'));
-  }
-  return out.sort();
 }
 
 function runInvariants(cfg = config, dir = repoRoot, tree) {
@@ -771,32 +741,64 @@ function lintPlan(plan) {
   const errors = [];
   const warnings = [];
   const cleanBody = plan.body.replace(/<!--[\s\S]*?-->/g, '');
-  const placeholderRe = /<(?:2-3 sentences:[^>]*|Compacted research:[^>]*|Unresolved assumptions[^>]*|Observable outcome|Checkable outcome|Step|Pre-mortem:[^>]*|What could go wrong[^>]*|What this plan deliberately[^>]*)>/i;
+  const placeholderRe = /<(?:2-3 sentences:[^>]*|Compacted research:[^>]*|Unresolved assumptions[^>]*|Observable outcome|Checkable outcome|Step|Pre-mortem:[^>]*|What could go wrong[^>]*|What this plan deliberately[^>]*|Hypothesis:[^>]*|Time-boxed findings[^>]*)>/i;
+  const hasPlaceholder = (textVal) =>
+    placeholderRe.test(
+      String(textVal || '').replace(/```[\s\S]*?```|`[^`\n]*`/g, ''),
+    );
 
   for (const heading of ['Summary', 'Acceptance criteria', 'Steps']) {
     const content = section(cleanBody, heading);
     if (!content) {
       errors.push(`Section "## ${heading}" is empty or missing.`);
-    } else if (placeholderRe.test(content)) {
+    } else if (hasPlaceholder(content)) {
       errors.push(`Section "## ${heading}" still contains template placeholder text.`);
+    }
+  }
+  const isSpike = /^Plan\s*-\s*Spike:/i.test(plan.meta.title || '');
+  if (isSpike) {
+    const hyp = section(cleanBody, 'Hypothesis');
+    if (!hyp) {
+      errors.push('Section "## Hypothesis" is empty or missing for Spike plan.');
+    } else if (hasPlaceholder(hyp)) {
+      errors.push('Section "## Hypothesis" still contains template placeholder text.');
+    }
+    const spikeAppetite = (plan.meta.appetite || '').trim().toUpperCase();
+    if (!spikeAppetite || spikeAppetite === 'L') {
+      warnings.push('Spike plans should be time-boxed with appetite S or M.');
     }
   }
   for (const heading of ['Risks', 'Out of scope']) {
     const content = section(cleanBody, heading);
     if (!content) {
       warnings.push(`Section "## ${heading}" is empty or missing.`);
-    } else if (placeholderRe.test(content)) {
+    } else if (hasPlaceholder(content)) {
       errors.push(`Section "## ${heading}" still contains template placeholder text.`);
     }
   }
   const ctxContent = section(cleanBody, 'Context');
-  if (ctxContent && placeholderRe.test(ctxContent)) {
+  if (ctxContent && hasPlaceholder(ctxContent)) {
     errors.push('Section "## Context" still contains template placeholder text.');
   }
 
   const openQ = countOpenQuestions(plan.body);
   if (openQ > 0) {
     errors.push(`Section "## Open questions" has ${openQ} unresolved item(s).`);
+  }
+  const blueprintRef = (plan.meta.blueprint || '').trim();
+  if (blueprintRef && !existsSync(resolve(repoRoot, blueprintRef))) {
+    errors.push(`Frontmatter "blueprint" references missing file: ${blueprintRef}`);
+  }
+  if (parseDependsOn(plan).length > 0) {
+    const depState = resolveDependencyState(plan);
+    if (depState.missing.length > 0) {
+      errors.push(
+        `dependsOn references missing plan(s): ${depState.missing.join(', ')}`,
+      );
+    }
+    if (depState.cycle) {
+      errors.push('dependsOn contains a circular dependency.');
+    }
   }
   if (
     plan.meta.impact &&
@@ -864,20 +866,6 @@ function lintPlan(plan) {
     warnings,
     uncoveredAc,
   };
-}
-
-function appendToSection(body, heading, entry) {
-  const lines = body.split('\n');
-  const start = lines.findIndex(
-    (l) => l.trim().toLowerCase() === `## ${heading}`.toLowerCase(),
-  );
-  if (start === -1)
-    return `${body.replace(/\s*$/, '')}\n\n## ${heading}\n\n${entry}\n`;
-  let end = lines.findIndex((l, i) => i > start && /^## /.test(l));
-  if (end === -1) end = lines.length;
-  while (end > start + 1 && lines[end - 1].trim() === '') end--;
-  lines.splice(end, 0, entry);
-  return lines.join('\n');
 }
 
 function pageId(url) {
@@ -1071,14 +1059,14 @@ const text = (content) => [{ text: { content: content.slice(0, NOTION_TEXT_LIMIT
 
 // ---------- plan resolution & diff helpers ----------
 
-function allPlans(root = repoRoot) {
-  const dir = join(root, config.plansDir);
+function allPlans(root = repoRoot, plansDirRel = config.plansDir || 'docs/plans') {
+  const dir = join(root, plansDirRel);
   if (!existsSync(dir)) return [];
   return readdirSync(dir, { withFileTypes: true })
     .filter((entry) => entry.isFile() && entry.name.endsWith('.plan.md') && !entry.name.startsWith('_'))
     .map((entry) => join(dir, entry.name))
     .filter((full) => readFileSync(full, 'utf8').startsWith('---'))
-    .map((full) => worktreePlan(full, root));
+    .map((full) => worktreePlan(full, root, plansDirRel));
 }
 
 function worktreeGit(dir, args) {
@@ -1137,9 +1125,9 @@ function worktreeIsMerged(root, head) {
     });
 }
 
-function worktreePlan(full, root) {
-  if (!containsPath(join(root, config.plansDir), full))
-    fail(`plan is outside ${config.plansDir}: ${full}`);
+function worktreePlan(full, root, plansDirRel = config.plansDir || 'docs/plans') {
+  if (!containsPath(join(root, plansDirRel), full))
+    fail(`plan is outside ${plansDirRel}: ${full}`);
   assertWorktreePath(root, full);
   const plan = readPlan(full);
   plan.rel = relative(root, full).replace(/\\/g, '/');
@@ -1231,18 +1219,17 @@ function ensurePlanWorktree(entries, branch, plan, { name, noCreate = false } = 
   return { path, created: true };
 }
 
-function localPlanStatus(plan) {
+function localPlanStatusForDir(plan, dir = repoRoot, cfg = config) {
   const status = plan.meta.status;
   const ticket = plan.meta.ticket || '';
-  if (!isLocal || !ticket.startsWith('local://') ||
-      !['in-progress', 'shipped'].includes(status)) return status;
-  const branches = config.protectedBranches || ['main', 'master', 'develop'];
+  if (!['in-progress', 'shipped'].includes(status)) return status;
+  const branches = cfg.protectedBranches || ['main', 'master', 'develop'];
   for (const branch of branches) {
     for (const ref of [`refs/remotes/origin/${branch}`, `refs/heads/${branch}`]) {
-      const merged = git(['show', `${ref}:${plan.rel}`], { allowFail: true });
+      const merged = git(['show', `${ref}:${plan.rel}`], { allowFail: true, cwd: dir });
       if (!merged.startsWith('---\n')) continue;
       const committed = readPlanText(merged, plan.rel);
-      if (committed.meta.ticket !== ticket) continue;
+      if (ticket && committed.meta.ticket !== ticket) continue;
       const { items } = findCheckboxes(committed.body);
       if (items.length && items.every((item) =>
         item.isChecked || /\sdeferred:\s*\S/i.test(item.text))) return 'done';
@@ -1250,6 +1237,117 @@ function localPlanStatus(plan) {
   }
   return status;
 }
+
+function localPlanStatus(plan) {
+  const status = plan.meta.status;
+  const ticket = plan.meta.ticket || '';
+  if (!isLocal || !ticket.startsWith('local://') ||
+      !['in-progress', 'shipped'].includes(status)) return status;
+  return localPlanStatusForDir(plan, repoRoot, config);
+}
+
+function isPlanCompletedOrArchived(plan, dir = repoRoot, cfg = config) {
+  if (!plan) return false;
+  const rel = (plan.rel || '').replace(/\\/g, '/');
+  if (rel.includes('/archive/')) return true;
+  const status = (plan.meta?.status || '').toLowerCase();
+  if (status === 'done' || status === 'completed') return true;
+  if (localPlanStatusForDir(plan, dir, cfg) === 'done') return true;
+  if (status === 'shipped') {
+    const { items } = findCheckboxes(plan.body || '');
+    return (
+      items.length > 0 &&
+      items.every(
+        (item) => item.isChecked || /\sdeferred:\s*\S/i.test(item.text),
+      )
+    );
+  }
+  return false;
+}
+
+function matchPlanByDependencyToken(token, catalogPlans) {
+  const norm = String(token || '').replace(/\\/g, '/').trim();
+  if (!norm) return null;
+  const normLower = norm.toLowerCase();
+  return (
+    catalogPlans.find((p) => {
+      const rel = (p.rel || '').replace(/\\/g, '/');
+      const base = basename(rel);
+      const stem = basename(rel, '.plan.md');
+      const key = (p.meta?.devTicketKey || '').trim();
+      return (
+        rel.toLowerCase() === normLower ||
+        base.toLowerCase() === normLower ||
+        stem.toLowerCase() === normLower ||
+        (key && key.toLowerCase() === normLower)
+      );
+    }) || null
+  );
+}
+
+function resolveDependencyState(plan, catalogPlans = null, dir = repoRoot) {
+  const repoCfg = dir === repoRoot ? config : readRepoConfig(dir);
+  const catalog = catalogPlans || scanPlansIncludingArchive(dir);
+  const tokens = parseDependsOn(plan);
+  if (!tokens.length) {
+    return {
+      deps: [],
+      missing: [],
+      unclosed: [],
+      cycle: false,
+      ready: true,
+    };
+  }
+
+  const missing = [];
+  const unclosed = [];
+  const deps = [];
+
+  for (const token of tokens) {
+    const target = matchPlanByDependencyToken(token, catalog);
+    if (!target) {
+      missing.push(token);
+      deps.push({ token, found: false, rel: null, done: false });
+      continue;
+    }
+    const done = isPlanCompletedOrArchived(target, dir, repoCfg);
+    if (!done) unclosed.push(target.rel);
+    deps.push({ token, found: true, rel: target.rel, done });
+  }
+
+  let cycle = false;
+  const startRel = (plan.rel || '').replace(/\\/g, '/');
+  const visited = new Set();
+  const stack = [plan];
+  while (stack.length > 0) {
+    const cur = stack.pop();
+    for (const tok of parseDependsOn(cur)) {
+      const next = matchPlanByDependencyToken(tok, catalog);
+      if (!next) continue;
+      const nextRel = (next.rel || '').replace(/\\/g, '/');
+      if (nextRel === startRel) {
+        cycle = true;
+        break;
+      }
+      if (!visited.has(nextRel)) {
+        visited.add(nextRel);
+        stack.push(next);
+      }
+    }
+    if (cycle) break;
+  }
+
+  return {
+    deps,
+    missing,
+    unclosed,
+    cycle,
+    ready: missing.length === 0 && unclosed.length === 0 && !cycle,
+  };
+}
+
+const collectRepoSymbolMap = (dir = repoRoot, optsArg) =>
+  collectRepoSymbolMapBase(dir, optsArg);
 
 function resolvePlanAndTarget() {
   const planArg = opts.files.find((f) => f.endsWith('.plan.md'));
@@ -1357,22 +1455,14 @@ function reviewFingerprint(plan, base, head, dir = repoRoot) {
   const diff = execFileSync('git', [
     'diff', '--binary', '--full-index', '--no-ext-diff', '--no-textconv',
     '--no-color', '--no-renames', base, ...(head ? [head] : []), '--',
-    '.', `:(exclude,literal)${plan.rel}`,
+    '.', `:(exclude,literal)${plan.rel}`, ':(exclude,literal)docs/lessons.md',
   ], { cwd: dir, maxBuffer: 64 * 1024 * 1024 });
   const scope = ['Summary', 'Acceptance criteria', 'Steps', 'Out of scope']
     .map((heading) => section(plan.body, heading));
   return createHash('sha256').update(JSON.stringify(scope)).update(diff).digest('hex');
 }
 
-function isTestFile(filePath, cfg = config) {
-  const normPath = filePath.replace(/\\/g, '/');
-  if (normPath.startsWith(`${cfg.plansDir || 'docs/plans'}/`)) return false;
-  const custom = cfg.hygiene?.testFilePatterns;
-  if (Array.isArray(custom) && custom.length) {
-    return custom.some((pat) => new RegExp(pat, 'i').test(normPath));
-  }
-  return /(?:^|\/)(?:tests?|__tests__)\/|(?:\.test\.|\.spec\.|_test\.)/i.test(normPath);
-}
+const isTestFile = (filePath, cfg = config) => isTestFileBase(filePath, cfg);
 
 function analyzeTestIntegrity(base, head, dir = repoRoot) {
   if (!base) {
@@ -1465,14 +1555,6 @@ function analyzeTestIntegrity(base, head, dir = repoRoot) {
     suspiciousDrop:
       deletedTestFiles.length > 0 || netTestDelta < 0 || addedSkips.length > 0,
   };
-}
-
-function isIgnoredDiffPath(filePath, ignorePatterns) {
-  const name = basename(filePath);
-  return ignorePatterns.some((pattern) => {
-    if (pattern.startsWith('*.')) return name.endsWith(pattern.slice(1));
-    return filePath === pattern || name === pattern;
-  });
 }
 
 function formatFilteredDiff(
@@ -1590,52 +1672,6 @@ function resolveRepoActivePlan(dir, branch, repoCfg = {}) {
   } catch {
     return null;
   }
-}
-
-function findCheckboxes(body) {
-  const lines = body.split('\n');
-  const items = [];
-  let currentSection = '';
-  let openIndex = 0;
-
-  for (let i = 0; i < lines.length; i++) {
-    const line = lines[i];
-    if (/^##\s+/.test(line)) {
-      currentSection = line.replace(/^##\s+/, '').trim();
-      continue;
-    }
-    const match = line.match(/^(\s*-\s*\[)([ xX])(\]\s*)(.*)$/);
-    if (match) {
-      const isChecked = match[2].toLowerCase() === 'x';
-      const text = match[4].trim();
-      const isDeferred = /deferred:/i.test(text);
-      if (!isChecked && !isDeferred) {
-        openIndex++;
-      }
-      items.push({
-        lineIndex: i,
-        prefix: match[1],
-        box: match[2],
-        delim: match[3],
-        text,
-        isChecked,
-        isDeferred,
-        section: currentSection,
-        openIndex: !isChecked && !isDeferred ? openIndex : null,
-      });
-    }
-  }
-  return { lines, items };
-}
-
-function findRunnerTarget(items, target) {
-  const identity = (item) => item.text
-    .replace(/\s+(?:verified(?:\((?:test|cmd|manual|inspect)\))?|deferred):.*$/i, '').trim();
-  const targetText = identity(target);
-  const candidates = items.filter((item) => item.section.toLowerCase() === target.section.toLowerCase() &&
-    identity(item) === targetText);
-  return candidates.find((item) => item.lineIndex === target.lineIndex) ||
-    (candidates.length === 1 ? candidates[0] : null);
 }
 
 // ---------- commands ----------
@@ -1783,7 +1819,10 @@ async function linkPullRequest(plan, prUrl, snapshot) {
   const retro = takeaway ? `- Retrospective (${tags}): ${takeaway}` : '';
   const addRetro = retro && !section(plan.body, 'Progress log').split('\n').includes(retro);
   const recordBase = snapshot?.baseBranch && snapshot.baseBranch !== plan.meta.baseBranch;
-  if (linked && !addRetro && !recordBase) return snapshot?.head;
+  if (linked && !addRetro && !recordBase) {
+    if (!opts.dryRun && !opts.retro) autoCaptureBugLesson(plan);
+    return snapshot?.head;
+  }
 
   const id = !isLocal && /^https:\/\//.test(plan.meta.ticket || '')
     ? (await readNotionTask(plan)).id
@@ -1800,11 +1839,25 @@ async function linkPullRequest(plan, prUrl, snapshot) {
     plan.body = appendToSection(plan.body, 'Progress log', retro);
   }
   writePlan(plan);
+  let bugLessonAdded = false;
+  if (!opts.dryRun && !opts.retro) {
+    const lessonRes = autoCaptureBugLesson(plan);
+    bugLessonAdded = Boolean(lessonRes && !lessonRes.deduplicated);
+  }
   let linkedHead;
   if (snapshot) {
     const linkedPlan = readFileSync(plan.full);
+    const commitPaths = [
+      plan.rel,
+      ...(bugLessonAdded && existsSync(join(repoRoot, 'docs/lessons.md'))
+        ? ['docs/lessons.md']
+        : []),
+    ];
     try {
-      git(['--literal-pathspecs', 'commit', '--only', '-m', `chore: link pr ${prUrl}`, '--', plan.rel]);
+      if (bugLessonAdded && existsSync(join(repoRoot, 'docs/lessons.md'))) {
+        git(['--literal-pathspecs', 'add', '--', 'docs/lessons.md']);
+      }
+      git(['--literal-pathspecs', 'commit', '--only', '-m', `chore: link pr ${prUrl}`, '--', ...commitPaths]);
     } catch (error) {
       if (git(['rev-parse', 'HEAD']) === snapshot.head && readFileSync(plan.full).equals(linkedPlan)) {
         writeFileSync(plan.full, original);
@@ -1816,7 +1869,9 @@ async function linkPullRequest(plan, prUrl, snapshot) {
     const linkedPaths = git([
       'diff-tree', '--no-commit-id', '--name-only', '-r', '-z', linkedHead,
     ]).split('\0').filter(Boolean);
-    if (parent !== snapshot.head || linkedPaths.length !== 1 || linkedPaths[0] !== plan.rel)
+    const allowedPaths = new Set(commitPaths);
+    if (parent !== snapshot.head || !linkedPaths.length || !linkedPaths.includes(plan.rel) ||
+        linkedPaths.some((p) => !allowedPaths.has(p)))
       fail('the PR link commit contains unexpected changes; inspect the local commit before pushing');
     assertPrSnapshot(snapshot.branch, linkedHead);
   }
@@ -1922,50 +1977,32 @@ function formatAgenticModelsSummary(cfg = config) {
   return ordered.join(' | ');
 }
 
-function loadLessons(dir = repoRoot) {
-  const lessonsPath = join(dir, 'docs', 'lessons.md');
-  if (!existsSync(lessonsPath)) return [];
-  const raw = readFileSync(lessonsPath, 'utf8');
-  const lines = raw.split('\n');
-  const entries = [];
-  for (let i = 0; i < lines.length; i++) {
-    const trimmed = lines[i].trim();
-    if (!trimmed.startsWith('- ')) continue;
-    const m = trimmed.match(/^-\s+(\d{4}-\d{2}-\d{2})\s*\|\s*([^|]*)\|\s*(.+)$/);
-    if (m) {
-      entries.push({
-        date: m[1].trim(),
-        meta: m[2].trim(),
-        text: m[3].trim(),
-        line: i + 1,
-        raw: trimmed,
-      });
-    } else {
-      entries.push({
-        date: '',
-        meta: 'general',
-        text: trimmed.slice(2).trim(),
-        line: i + 1,
-        raw: trimmed,
-      });
-    }
-  }
-  return entries;
-}
+const loadLessons = (dir = repoRoot) => loadLessonsBase(dir);
 
 function appendLesson({ text, tags = [], planRel = '', dir = repoRoot }) {
   const cleanText = String(text || '').replace(/\s+/g, ' ').trim();
   if (!cleanText) fail('lesson text cannot be empty');
+  const normPlan = planRel ? planRel.replace(/\\/g, '/') : '';
+  const lessonsPath = join(dir, 'docs', 'lessons.md');
+  const existingEntries = loadLessons(dir);
+  const dup = existingEntries.find(
+    (e) =>
+      e.text.toLowerCase() === cleanText.toLowerCase() &&
+      (!normPlan || e.meta.includes(normPlan)),
+  );
+  if (dup) {
+    return { path: lessonsPath, line: dup.raw, deduplicated: true };
+  }
+
   const tagList = (Array.isArray(tags) ? tags : String(tags || '').split(','))
     .map((t) => t.trim())
     .filter(Boolean);
   const metaParts = [];
   if (tagList.length) metaParts.push(tagList.join(', '));
-  if (planRel) metaParts.push(planRel.replace(/\\/g, '/'));
+  if (normPlan) metaParts.push(normPlan);
   const metaCol = metaParts.join(' · ') || 'general';
   const entryLine = `- ${today()} | ${metaCol} | ${cleanText}`;
 
-  const lessonsPath = join(dir, 'docs', 'lessons.md');
   mkdirSync(dirname(lessonsPath), { recursive: true });
   if (!existsSync(lessonsPath)) {
     const header = [
@@ -1979,7 +2016,59 @@ function appendLesson({ text, tags = [], planRel = '', dir = repoRoot }) {
     const existing = readFileSync(lessonsPath, 'utf8').trimEnd();
     writeFileSync(lessonsPath, `${existing}\n${entryLine}\n`, 'utf8');
   }
-  return { path: lessonsPath, line: entryLine };
+  return { path: lessonsPath, line: entryLine, deduplicated: false };
+}
+
+function firstSentence(rawText) {
+  const cleaned = String(rawText || '')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+  if (!cleaned) return '';
+  const m = cleaned.match(/^(.+?[.!?])(?:\s|$)/);
+  return (m ? m[1] : cleaned).slice(0, 220).trim();
+}
+
+function autoCaptureBlockerResolutionLesson(plan, summary, dir = repoRoot) {
+  if (opts.dryRun || config.lessons?.autoCapture === false) return null;
+  const logSection = section(plan.body, 'Progress log') || '';
+  if (!/\(review:\s*block\b/i.test(logSection)) return null;
+  const blockerLines = logSection
+    .split('\n')
+    .map((l) => l.trim())
+    .filter((l) => /\(review:\s*block\b/i.test(l));
+  const lastBlocker = blockerLines.at(-1) || '';
+  const blockerMatch = lastBlocker.match(/\(review:\s*block[^)]*\):\s*(.+)$/i);
+  const blockerSummary = blockerMatch
+    ? blockerMatch[1].replace(/\s*\[(?:reviewer|self-review|test-drop):[^\]]*\]/gi, '').trim()
+    : '';
+  const cleanSummary = String(summary || '').replace(/\s+/g, ' ').trim();
+  const lessonText = blockerSummary
+    ? `Resolved review blocker (${blockerSummary}): ${cleanSummary}`
+    : `Resolved review blocker: ${cleanSummary}`;
+  return appendLesson({
+    text: lessonText,
+    tags: ['review-blocker'],
+    planRel: plan.rel,
+    dir,
+  });
+}
+
+function autoCaptureBugLesson(plan, dir = repoRoot) {
+  if (opts.dryRun || opts.retro || config.lessons?.autoCapture === false) return null;
+  const planType = parsePlanTypeFromMeta(plan.meta);
+  const modePrefix = ((plan.meta.title || '').match(/^([^-\s]+)\s*-/) || [])[1] || '';
+  if (!/^(?:bug|debug)$/i.test(planType) && !/^debug$/i.test(modePrefix)) return null;
+  const summarySentence =
+    firstSentence(section(plan.body, 'Summary')) ||
+    (plan.meta.title || '').replace(/^(?:Plan|Debug|Ask)\s*-\s*[^:]+:\s*/i, '').trim();
+  if (!summarySentence) return null;
+  return appendLesson({
+    text: summarySentence,
+    tags: ['bug-fix'],
+    planRel: plan.rel,
+    dir,
+  });
 }
 
 function selectRelevantLessons(plan, { dir = repoRoot, limit = 5 } = {}) {
@@ -2039,21 +2128,6 @@ function scanPlansIncludingArchive(dir = repoRoot) {
   return results;
 }
 
-function parsePlanTypeFromMeta(meta) {
-  const title = (meta?.title || '').trim();
-  const m = title.match(/^(?:Plan|Debug|Ask)\s*-\s*([^:]+):/i);
-  if (m) return m[1].trim();
-  if (/^Debug\b/i.test(title)) return 'Debug';
-  return 'Unknown';
-}
-
-function parseIsoDayOrMs(value) {
-  const s = String(value || '').trim();
-  if (!s) return null;
-  const ms = Date.parse(s.length === 10 ? `${s}T00:00:00Z` : s);
-  return Number.isNaN(ms) ? null : ms;
-}
-
 function parseGitCommitLog(dir, days = 90) {
   const args = ['log', '--name-only', '--format=__COMMIT__%H|%cI|%s'];
   if (days > 0) args.push(`--since=${days} days ago`);
@@ -2090,24 +2164,42 @@ function parseGitCommitLog(dir, days = 90) {
   return commits;
 }
 
-function percentile(sortedNums, p) {
-  if (!sortedNums.length) return null;
-  if (sortedNums.length === 1) return sortedNums[0];
-  if (p === 0.5) {
-    const mid = Math.floor(sortedNums.length / 2);
-    return sortedNums.length % 2 === 1
-      ? sortedNums[mid]
-      : Number(((sortedNums[mid - 1] + sortedNums[mid]) / 2).toFixed(2));
+const isNoiseFileForDefects = (filePath, cfg = config) =>
+  isNoiseFileForDefectsBase(filePath, cfg);
+
+function extractCommitFileLineRanges(dir, commitHash, filePath) {
+  let diff = '';
+  try {
+    diff = worktreeGit(dir, [
+      'show',
+      '--unified=0',
+      '--format=',
+      commitHash,
+      '--',
+      filePath,
+    ]);
+  } catch {
+    return [];
   }
-  const idx = Math.min(sortedNums.length - 1, Math.ceil(p * sortedNums.length) - 1);
-  return sortedNums[idx];
+  const ranges = [];
+  for (const m of diff.matchAll(/^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/gm)) {
+    const oldStart = parseInt(m[1], 10);
+    const oldCount = m[2] !== undefined ? parseInt(m[2], 10) : 1;
+    const newStart = parseInt(m[3], 10);
+    const newCount = m[4] !== undefined ? parseInt(m[4], 10) : 1;
+    if (oldCount > 0) ranges.push([oldStart, oldStart + oldCount - 1]);
+    else if (oldStart > 0) ranges.push([oldStart, oldStart]);
+    if (newCount > 0) ranges.push([newStart, newStart + newCount - 1]);
+    else if (newStart > 0) ranges.push([newStart, newStart]);
+  }
+  return ranges;
 }
 
-function round1(n) {
-  return Number(n.toFixed(1));
-}
-
-function collectRepoStats(dir = repoRoot, { days = 90, filterDays = false } = {}) {
+function collectRepoStats(
+  dir = repoRoot,
+  { days = 90, filterDays = false, allOverlaps = false } = {},
+) {
+  const repoCfg = dir === repoRoot ? config : readRepoConfig(dir);
   const allFoundPlans = scanPlansIncludingArchive(dir);
   const commits = parseGitCommitLog(dir, days);
   const nowMs = Date.now();
@@ -2222,7 +2314,8 @@ function collectRepoStats(dir = repoRoot, { days = 90, filterDays = false } = {}
       }
     }
     const touchedCodeFiles = new Set();
-    const plansPrefix = `${(config.plansDir || 'docs/plans').replace(/\\/g, '/')}/`;
+    const commitHashes = [];
+    const plansPrefix = `${(repoCfg.plansDir || 'docs/plans').replace(/\\/g, '/')}/`;
     if (matchingCommitIdxs.length) {
       const minIdx = Math.min(...matchingCommitIdxs);
       const maxIdx = Math.max(...matchingCommitIdxs);
@@ -2234,8 +2327,13 @@ function collectRepoStats(dir = repoRoot, { days = 90, filterDays = false } = {}
         ? matchingCommitIdxs.map((idx) => commits[idx])
         : commits.slice(minIdx, maxIdx + 1);
       for (const c of slice) {
+        commitHashes.push(c.hash);
         for (const f of c.files) {
-          if (!f.startsWith(plansPrefix) && !f.endsWith('.plan.md')) {
+          if (
+            !f.startsWith(plansPrefix) &&
+            !f.endsWith('.plan.md') &&
+            !isNoiseFileForDefects(f, repoCfg)
+          ) {
             touchedCodeFiles.add(f);
           }
         }
@@ -2249,30 +2347,65 @@ function collectRepoStats(dir = repoRoot, { days = 90, filterDays = false } = {}
       startMs,
       endMs: endMs || commitDateByFile.get(p.rel) || null,
       touchedCodeFiles,
+      commitHashes,
     });
   }
 
-  // AC2: Escaped defect detection (14-day window after Feature/Refactor completion)
+  // AC1: Escaped defect detection (14-day window after Feature/Refactor completion with hunk-range & most-recent-owner attribution)
   const escapedDefects = [];
   const windowMs = 14 * 86400000;
-  const featurePlans = enrichedPlans.filter(
-    (ep) =>
-      /^(?:feature|refactor)$/i.test(ep.type) &&
-      ep.endMs &&
-      ep.touchedCodeFiles.size > 0,
-  );
+  const featurePlans = enrichedPlans
+    .filter(
+      (ep) =>
+        /^(?:feature|refactor)$/i.test(ep.type) &&
+        ep.endMs &&
+        ep.touchedCodeFiles.size > 0,
+    )
+    .sort((a, b) => b.endMs - a.endMs);
   const bugPlans = enrichedPlans.filter((ep) =>
     /^(?:bug|debug)$/i.test(ep.type),
   );
   const revertCommits = commits.filter((c) => /^Revert\b/i.test(c.subject));
 
+  const filePlanCount = new Map();
   for (const fp of featurePlans) {
-    for (const bp of bugPlans) {
+    for (const f of fp.touchedCodeFiles) {
+      filePlanCount.set(f, (filePlanCount.get(f) || 0) + 1);
+    }
+  }
+
+  const lineRangeCache = new Map();
+  const getCommitRanges = (commitHash, file) => {
+    const key = `${commitHash}:${file}`;
+    if (!lineRangeCache.has(key)) {
+      lineRangeCache.set(key, extractCommitFileLineRanges(dir, commitHash, file));
+    }
+    return lineRangeCache.get(key);
+  };
+  const getPlanRanges = (ep, file) => {
+    const out = [];
+    for (const h of ep.commitHashes) {
+      out.push(...getCommitRanges(h, file));
+    }
+    return out;
+  };
+  const fileOverlapsHunks = (file, fp, targetRangesFn) => {
+    if ((filePlanCount.get(file) || 0) <= 2) return true;
+    const fpRanges = getPlanRanges(fp, file);
+    const targetRanges = targetRangesFn();
+    return rangesOverlap(fpRanges, targetRanges);
+  };
+
+  for (const bp of bugPlans) {
+    const bpDate = bp.startMs || bp.endMs;
+    if (!bpDate) continue;
+    for (const fp of featurePlans) {
       if (bp.plan.rel === fp.plan.rel) continue;
-      const bpDate = bp.startMs || bp.endMs;
-      if (!bpDate || bpDate < fp.endMs || bpDate - fp.endMs > windowMs) continue;
-      const overlap = [...bp.touchedCodeFiles].filter((f) =>
-        fp.touchedCodeFiles.has(f),
+      if (bpDate < fp.endMs || bpDate - fp.endMs > windowMs) continue;
+      const overlap = [...bp.touchedCodeFiles].filter(
+        (f) =>
+          fp.touchedCodeFiles.has(f) &&
+          fileOverlapsHunks(f, fp, () => getPlanRanges(bp, f)),
       );
       if (overlap.length) {
         escapedDefects.push({
@@ -2283,13 +2416,21 @@ function collectRepoStats(dir = repoRoot, { days = 90, filterDays = false } = {}
           daysAfter: round1((bpDate - fp.endMs) / 86400000),
           overlappingFiles: overlap,
         });
+        if (!allOverlaps) break;
       }
     }
-    for (const rc of revertCommits) {
-      if (!rc.dateMs || rc.dateMs < fp.endMs || rc.dateMs - fp.endMs > windowMs) {
-        continue;
-      }
-      const overlap = rc.files.filter((f) => fp.touchedCodeFiles.has(f));
+  }
+
+  for (const rc of revertCommits) {
+    if (!rc.dateMs) continue;
+    for (const fp of featurePlans) {
+      if (rc.dateMs < fp.endMs || rc.dateMs - fp.endMs > windowMs) continue;
+      const overlap = rc.files.filter(
+        (f) =>
+          !isNoiseFileForDefects(f, repoCfg) &&
+          fp.touchedCodeFiles.has(f) &&
+          fileOverlapsHunks(f, fp, () => getCommitRanges(rc.hash, f)),
+      );
       if (overlap.length) {
         escapedDefects.push({
           kind: 'revert',
@@ -2299,6 +2440,7 @@ function collectRepoStats(dir = repoRoot, { days = 90, filterDays = false } = {}
           daysAfter: round1((rc.dateMs - fp.endMs) / 86400000),
           overlappingFiles: overlap,
         });
+        if (!allOverlaps) break;
       }
     }
   }
@@ -2374,6 +2516,7 @@ function buildStepBrief(
       `# Planner Brief: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Branch: ${plan.meta.branch || branch}`,
       ...(targetModel ? [`Model: ${targetModel}`] : []),
+      ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
       '',
       '## Summary',
       summary,
@@ -2419,6 +2562,7 @@ function buildStepBrief(
       `# Autonomous Builder Brief: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Branch: ${plan.meta.branch || branch}`,
       ...(targetModel ? [`Model: ${targetModel}`] : []),
+      ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
       `Target: ${nextItem ? `[${nextItem.openIndex}] ${nextItem.text} (section: ${nextItem.section})` : 'All items completed!'}`,
       '',
       '## Objective & Scope',
@@ -2438,6 +2582,9 @@ function buildStepBrief(
       `2. Run verification: \`${verifyCmd}\` (tier: ${verifyTier}).`,
       `3. Retry budget: up to ${maxRetries} self-healing attempts (currently ${currentRetries}/${maxRetries} used). If still failing after ${maxRetries} tries, STOP, log handoff, and escalate.`,
       `4. Checkpoint & tick: node scripts/ticket.mjs checkpoint ${nextItem ? nextItem.openIndex : ''} --commit`,
+      ...(plan.meta.blueprint
+        ? [`5. Preserve the contracts and invariants defined in \`${plan.meta.blueprint}\`.`]
+        : []),
     ];
     if (failureContext && failureContext.trim()) {
       brief.push('', '## Last Verification Failure', failureContext.trim());
@@ -2453,6 +2600,7 @@ function buildStepBrief(
       `# Adversarial Review Brief: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Branch: ${plan.meta.branch || branch}`,
       ...(targetModel ? [`Model: ${targetModel}`] : []),
+      ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
       '',
       '## Review Protocol (Fresh Context Window)',
       '1. Inspect review packet with embedded test verification:',
@@ -2475,6 +2623,9 @@ function buildStepBrief(
       '- Verification Honesty: Does every ticked criterion cite verified evidence without fake claims?',
       '- Test Regressions: Did all tests pass cleanly?',
       '- Code Hygiene: No temporary files, conflict markers, or debris.',
+      ...(plan.meta.blueprint
+        ? [`- Blueprint Alignment: Does the implementation preserve the contracts and invariants in \`${plan.meta.blueprint}\`?`]
+        : []),
       '',
       '## Verdict Command',
       `node scripts/ticket.mjs review ${plan.rel} --agent <you> --verdict <pass|warn|block> --summary "<concise findings>"`,
@@ -2501,6 +2652,7 @@ function buildStepBrief(
       `# Block-Fixer Brief: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Branch: ${plan.meta.branch || branch}`,
       ...(targetModel ? [`Model: ${targetModel}`] : []),
+      ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
       '',
       '## Blocker Findings to Resolve',
       latestBlock,
@@ -2513,6 +2665,9 @@ function buildStepBrief(
       `2. Verify: \`${verifyCmd}\` (tier: ${verifyTier}).`,
       '3. Run checkpoint or re-review:',
       `   node scripts/ticket.mjs review ${plan.rel} --agent <you> --verdict pass --summary "Resolved review blocker findings"`,
+      ...(plan.meta.blueprint
+        ? [`4. Preserve the contracts and invariants defined in \`${plan.meta.blueprint}\`.`]
+        : []),
     ].join('\n');
   }
 
@@ -2524,6 +2679,7 @@ function buildStepBrief(
     `# Next Step Brief: ${plan.meta.title || plan.rel}`,
     `Plan: ${plan.rel} | Branch: ${plan.meta.branch || branch}`,
     ...(targetModel ? [`Model: ${targetModel}`] : []),
+    ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
     `Target [${nextItem.openIndex}]: ${nextItem.text}`,
     `Section: ${nextItem.section}`,
     `Remaining: ${openSteps.length} step(s), ${openCriteria.length} criterion/criteria`,
@@ -2588,16 +2744,6 @@ function runBootBaselineCheck() {
     .slice(-5)
     .join(' | ');
   return `Baseline: FAIL (\`${resolved.cmd}\`, tier: ${resolved.tier})${tail ? ` [${tail}]` : ''} — fix baseline before starting next step`;
-}
-
-function tailLines(textValue, count = 15) {
-  if (!textValue) return '';
-  return textValue
-    .split(/\r?\n/)
-    .map((l) => l.trimEnd())
-    .filter(Boolean)
-    .slice(-count)
-    .join('\n');
 }
 
 function executeCheckpoint(
@@ -2892,9 +3038,11 @@ const commands = {
     const rawTopic = opts.files[0] || opts.topic || '';
     if (!rawTopic)
       fail(
-        'usage: node scripts/ticket.mjs new "<Topic>" [--type Feature|Bug|Refactor|Process|Docs] [--priority <p>] [--state <s>] [--due <YYYY-MM-DD>] [--branch]',
+        'usage: node scripts/ticket.mjs new "<Topic>" [--type Feature|Bug|Refactor|Spike|Process|Docs] [--priority <p>] [--state <s>] [--due <YYYY-MM-DD>] [--branch]',
       );
     const type = opts.type || 'Feature';
+    const isSpike = type.toLowerCase() === 'spike';
+    const isRefactor = type.toLowerCase() === 'refactor';
     const topic = rawTopic.replace(/^["']|["']$/g, '').trim();
     const kebabTopic = topic
       .replace(/[^a-zA-Z0-9]+/g, '-')
@@ -2909,10 +3057,15 @@ const commands = {
     const priority = opts.priority || '';
     const state = opts.state || '';
     const due = opts.due || '';
-    const appetite = (opts.appetite || '').trim().toUpperCase();
+    const appetite = (opts.appetite || (isSpike ? 'S' : '')).trim().toUpperCase();
     if (appetite && !['S', 'M', 'L'].includes(appetite)) {
       fail(`--appetite must be S, M, or L (got "${opts.appetite}")`);
     }
+    const timebox = (
+      opts.timebox !== undefined ? String(opts.timebox) : isSpike ? '2h' : ''
+    )
+      .replace(/^["']|["']$/g, '')
+      .trim();
     const verCfg = config.versioning || {};
     const version =
       opts.version !== undefined
@@ -2940,6 +3093,15 @@ const commands = {
 
     const summary = (opts.summary || '').replace(/^["']|["']$/g, '').trim();
     const contextText = (opts.context || '').replace(/^["']|["']$/g, '').trim();
+    let blueprintRel = '';
+    if (opts.blueprint !== undefined) {
+      const rawBp = String(opts.blueprint || '').replace(/^["']|["']$/g, '').trim();
+      if (!rawBp) fail('--blueprint requires a file path');
+      const bpFull = resolve(repoRoot, rawBp);
+      if (!existsSync(bpFull)) fail(`blueprint not found: ${rawBp}`);
+      blueprintRel = relative(repoRoot, bpFull).replace(/\\/g, '/');
+    }
+    const dependsOn = (opts.dependsOn || '').replace(/^["']|["']$/g, '').trim();
     const rawCriteria = (opts.criteria || '')
       .replace(/^["']|["']$/g, '')
       .trim();
@@ -2952,9 +3114,10 @@ const commands = {
           .filter(Boolean)
           .map((c) => `- [ ] ${c}`)
           .join('\n')
-      : '- [ ] AC1: <Observable outcome>';
+      : isSpike
+        ? '- [ ] AC1: Documented answer and go/no-go recommendation recorded in Findings & Recommendation'
+        : '- [ ] AC1: <Observable outcome>';
 
-    const isRefactor = type.toLowerCase() === 'refactor';
     const stepsList = rawSteps
       ? rawSteps
           .split(/[|\n]/)
@@ -2962,9 +3125,14 @@ const commands = {
           .filter(Boolean)
           .map((s) => `- [ ] ${s}`)
           .join('\n')
-      : isRefactor
-        ? '- [ ] Lock existing behaviour with characterization tests before structural changes (AC1)'
-        : '- [ ] <Step> (AC1)';
+      : isSpike
+        ? [
+            `- [ ] Run time-boxed prototype or experiment within ${timebox || '2h'} budget (AC1)`,
+            '- [ ] Record findings, trade-offs, and recommendation in "## Findings & Recommendation" (AC1)',
+          ].join('\n')
+        : isRefactor
+          ? '- [ ] Lock existing behaviour with characterization tests before structural changes (AC1)'
+          : '- [ ] <Step> (AC1)';
 
     const templatePath = join(repoRoot, config.plansDir, '_template.plan.md');
     let template = existsSync(templatePath)
@@ -2989,6 +3157,20 @@ const commands = {
       if (impact && !/^impact:/m.test(content)) {
         content = content.replace(/^---\n/, `---\nimpact: ${impact}\n`);
       }
+      if (blueprintRel) {
+        content = content.replace(
+          /\n---\n/,
+          `\nblueprint: ${blueprintRel}\n---\n`,
+        );
+      }
+      if (/^dependsOn:/m.test(content)) {
+        content = content.replace(/^dependsOn:.*$/m, `dependsOn: ${dependsOn}`);
+      } else if (dependsOn) {
+        content = content.replace(
+          /\n---\n/,
+          `\ndependsOn: ${dependsOn}\n---\n`,
+        );
+      }
       if (summary) {
         content = content.replace(
           /<2-3 sentences: what changes and why\.>/,
@@ -3000,17 +3182,42 @@ const commands = {
           /<Compacted research:[^>]*>/,
           contextText,
         );
+      } else if (blueprintRel) {
+        content = content.replace(
+          /<Compacted research:[^>]*>/,
+          `See architecture blueprint: \`${blueprintRel}\``,
+        );
       }
-      if (rawCriteria) {
+      if (rawCriteria || isSpike) {
         content = content.replace(
           /- \[ \] (?:AC1: )?<[^>]+>/,
           criteriaList,
         );
       }
-      if (rawSteps || isRefactor) {
+      if (rawSteps || isRefactor || isSpike) {
         content = content.replace(
           /- \[ \] <Step>(?: \(AC1\))?/,
           stepsList,
+        );
+      }
+      if (timebox) {
+        if (/^appetite:/m.test(content)) {
+          content = content.replace(
+            /^(appetite:.*$)/m,
+            `$1\ntimebox: ${timebox}`,
+          );
+        } else {
+          content = content.replace(/\n---\n/, `\ntimebox: ${timebox}\n---\n`);
+        }
+      }
+      if (isSpike) {
+        content = content.replace(
+          /## Acceptance criteria/,
+          '## Hypothesis\n\n<Hypothesis: What question or unknown are we answering, and what would prove or disprove it?>\n\n## Acceptance criteria',
+        );
+        content = content.replace(
+          /## Risks/,
+          '## Findings & Recommendation\n\n<Time-boxed findings, decision (go / no-go / ADR), and follow-up links.>\n\n## Risks',
         );
       }
     } else {
@@ -3023,8 +3230,11 @@ const commands = {
         `state: ${state}`,
         `due: ${due}`,
         `appetite: ${appetite}`,
+        ...(timebox ? [`timebox: ${timebox}`] : []),
         `version: ${version}`,
         `impact: ${impact}`,
+        ...(blueprintRel ? [`blueprint: ${blueprintRel}`] : []),
+        ...(dependsOn ? [`dependsOn: ${dependsOn}`] : []),
         '---',
         `# ${topic}`,
         '',
@@ -3034,11 +3244,22 @@ const commands = {
         '',
         '## Context',
         '',
-        contextText || '<Compacted research: relevant files with path:line, current behaviour, constraints, and alternatives considered & rejected.>',
+        contextText ||
+          (blueprintRel
+            ? `See architecture blueprint: \`${blueprintRel}\``
+            : '<Compacted research: relevant files with path:line, current behaviour, constraints, and alternatives considered & rejected.>'),
         '',
         '## Open questions',
         '',
         '<Unresolved assumptions or `- [ ] Question?` items to resolve before `start`; write `None` when clear.>',
+        ...(isSpike
+          ? [
+              '',
+              '## Hypothesis',
+              '',
+              '<Hypothesis: What question or unknown are we answering, and what would prove or disprove it?>',
+            ]
+          : []),
         '',
         '## Acceptance criteria',
         '',
@@ -3047,6 +3268,14 @@ const commands = {
         '## Steps',
         '',
         stepsList,
+        ...(isSpike
+          ? [
+              '',
+              '## Findings & Recommendation',
+              '',
+              '<Time-boxed findings, decision (go / no-go / ADR), and follow-up links.>',
+            ]
+          : []),
         '',
         '## Risks',
         '',
@@ -3070,6 +3299,8 @@ const commands = {
       content = content
         .replace(/<Compacted research:[^>]*>/g, 'None noted.')
         .replace(/<Unresolved assumptions[^>]*>/g, 'None')
+        .replace(/<Hypothesis:[^>]*>/g, 'None noted.')
+        .replace(/<Time-boxed findings[^>]*>/g, 'None noted.')
         .replace(/<Pre-mortem:[^>]*>/g, 'None noted.')
         .replace(/<What this plan deliberately[^>]*>/g, 'None noted.');
     }
@@ -3145,6 +3376,7 @@ const commands = {
       `# Session Context: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Status: ${localPlanStatus(plan) || 'unknown'} | Ticket: ${plan.meta.ticket || 'none'}${appetiteLabel}${versionLabel}`,
       `Branch: ${branch} | Tree: ${clean ? 'clean' : 'dirty'} | Open questions: ${openQuestions}${plan.meta.reviewedBy ? ` | Reviewed: ${plan.meta.reviewedBy} (${plan.meta.reviewVerdict})` : ''}`,
+      ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
       ...(baselineLine ? [baselineLine] : []),
       ...(() => {
         const tiers = getVerifyTiers();
@@ -3389,6 +3621,7 @@ const commands = {
         ticket: plan.meta.ticket || null,
         role: activeRole,
         ...(targetModel ? { model: targetModel } : {}),
+        ...(plan.meta.blueprint ? { blueprint: plan.meta.blueprint } : {}),
         nextStep: nextItem
           ? {
               index: nextItem.openIndex,
@@ -4048,6 +4281,7 @@ const commands = {
       `# Review Packet: ${plan.meta.title || plan.rel}`,
       `Plan: ${plan.rel} | Status: ${localPlanStatus(plan) || 'unknown'} | Branch: ${plan.meta.branch || git(['rev-parse', '--abbrev-ref', 'HEAD'], { allowFail: true })}`,
       `Ticket: ${plan.meta.ticket || 'none'} | Reviewed: ${plan.meta.reviewedBy ? `${plan.meta.reviewedBy} (${plan.meta.reviewVerdict || 'unknown'})` : 'not yet'}${appetiteRes ? ` | Appetite: ${appetiteRes.appetite} (${appetiteRes.lines}/${appetiteRes.maxLines} lines, ${appetiteRes.files}/${appetiteRes.maxFiles} files${appetiteRes.exceeded ? ' — EXCEEDED' : ''})` : ''}${plan.meta.version ? ` | Version: ${plan.meta.version}${plan.meta.impact ? ` (${plan.meta.impact})` : ''}` : ''}`,
+      ...(plan.meta.blueprint ? [`Blueprint: ${plan.meta.blueprint}`] : []),
       ...(resolvedTest
         ? [
             `Verify command: \`${resolvedTest.cmd}\`${resolvedTest.tier !== 'test' ? ` (${resolvedTest.tier})` : ''}`,
@@ -4290,13 +4524,16 @@ const commands = {
     if (verdict === 'block') {
       delete plan.meta.reviewFingerprint;
     } else {
-      if (git(['ls-files', '--others', '--exclude-standard', '--', '.', `:(exclude,literal)${plan.rel}`]))
+      if (git(['ls-files', '--others', '--exclude-standard', '--', '.', `:(exclude,literal)${plan.rel}`, ':(exclude,literal)docs/lessons.md']))
         fail('review omits untracked files; stage the reviewed files before stamping a verdict');
       if (!opts.base || configuredPrBase(opts.base)) {
         const baseBranch = plannedBaseBranch(plan);
         if (baseBranch) plan.meta.baseBranch = baseBranch;
       }
       plan.meta.reviewFingerprint = reviewFingerprint(plan);
+    }
+    if (verdict === 'pass') {
+      autoCaptureBlockerResolutionLesson(plan, summary);
     }
     const extraTags = [
       reviewerId && verdict !== 'block' ? ` [reviewer: ${reviewerId}]` : '',
@@ -4492,6 +4729,7 @@ const commands = {
       const pr = readPullRequest(target);
       await closeMergedPullPlan(pr, plan, pullRequestFiles(pr));
     }
+    autoCaptureBugLesson(plan);
     console.log(`Ticket set to Done: ${plan.meta.ticket}`);
   },
 
@@ -4573,6 +4811,7 @@ const commands = {
       await closeMergedPullPlan(pr, plan, files);
       console.log(`Ticket set to Done: ${plan.meta.ticket}`);
     }
+    autoCaptureBugLesson(plan);
   },
 
   async 'ci-check'() {
@@ -5004,6 +5243,204 @@ const commands = {
     for (const dir of dirs) applyHook(dir);
   },
 
+  async blueprint() {
+    const rawTopic = opts.files[0] || opts.topic || '';
+    const archDir = join(repoRoot, 'docs', 'architecture');
+    if (rawTopic.trim().toLowerCase() === 'status') {
+      const rawBpArg = (opts.files[1] || opts.blueprint || '').replace(/^["']|["']$/g, '').trim();
+      let bpRel = '';
+      if (rawBpArg) {
+        const bpFull = resolve(repoRoot, rawBpArg);
+        bpRel = existsSync(bpFull)
+          ? relative(repoRoot, bpFull).replace(/\\/g, '/')
+          : rawBpArg.replace(/\\/g, '/');
+      } else {
+        const archFiles = existsSync(archDir)
+          ? readdirSync(archDir)
+              .filter((f) => f.endsWith('.md') && !f.startsWith('_'))
+              .sort()
+          : [];
+        if (!archFiles.length) {
+          fail('no architecture blueprints found in docs/architecture/');
+        }
+        bpRel = `docs/architecture/${archFiles[0]}`;
+      }
+
+      const catalog = scanPlansIncludingArchive(repoRoot);
+      const bpBase = basename(bpRel);
+      const childPlans = catalog.filter((p) => {
+        const ref = (p.meta.blueprint || '').replace(/\\/g, '/').trim();
+        return ref && (ref === bpRel || basename(ref) === bpBase);
+      });
+
+      const counts = {
+        total: childPlans.length,
+        done: 0,
+        'in-progress': 0,
+        ready: 0,
+        blocked: 0,
+      };
+      let totalBoxes = 0;
+      let checkedBoxes = 0;
+
+      const slices = childPlans.map((p) => {
+        const { items } = findCheckboxes(p.body);
+        const ticked = items.filter((it) => it.isChecked).length;
+        totalBoxes += items.length;
+        checkedBoxes += ticked;
+
+        const completed = isPlanCompletedOrArchived(p, repoRoot, config);
+        const depState = resolveDependencyState(p, catalog, repoRoot);
+        const st = (p.meta.status || 'draft').toLowerCase();
+        let sliceState = 'ready';
+        if (completed) {
+          sliceState = 'done';
+          counts.done++;
+        } else if (!depState.ready) {
+          sliceState = 'blocked';
+          counts.blocked++;
+        } else if (st === 'in-progress') {
+          sliceState = 'in-progress';
+          counts['in-progress']++;
+        } else {
+          sliceState = 'ready';
+          counts.ready++;
+        }
+
+        return {
+          plan: p.rel,
+          title: p.meta.title || basename(p.rel),
+          status: p.meta.status || 'draft',
+          sliceState,
+          progress: `${ticked}/${items.length}`,
+          ticked,
+          total: items.length,
+          dependsOn: parseDependsOn(p),
+          blockedBy: [...depState.missing, ...depState.unclosed],
+          claimedBy: p.meta.claimedBy || null,
+        };
+      });
+
+      const payload = {
+        blueprint: bpRel,
+        counts,
+        checkboxes: { checked: checkedBoxes, total: totalBoxes },
+        slices,
+      };
+
+      if (opts.json) {
+        console.log(JSON.stringify(payload, null, 2));
+        return;
+      }
+
+      console.log(`=== Blueprint Status: ${bpRel} ===`);
+      console.log(
+        `Slices: ${counts.total} total (done: ${counts.done}, in-progress: ${counts['in-progress']}, ready: ${counts.ready}, blocked: ${counts.blocked}) | Checkboxes: ${checkedBoxes}/${totalBoxes}`,
+      );
+      if (!slices.length) {
+        console.log('No plans linked to this blueprint yet.');
+        return;
+      }
+      for (const s of slices) {
+        const depNote = s.blockedBy.length
+          ? ` [blocked by: ${s.blockedBy.join(', ')}]`
+          : s.dependsOn.length
+            ? ` [deps satisfied: ${s.dependsOn.join(', ')}]`
+            : '';
+        const claimNote = s.claimedBy ? ` (claimed by ${s.claimedBy})` : '';
+        console.log(
+          `- [${s.sliceState}] ${s.plan} (${s.progress}) — ${s.title}${depNote}${claimNote}`,
+        );
+      }
+      return;
+    }
+
+    if (!rawTopic || rawTopic.trim().toLowerCase() === 'list') {
+      const files = existsSync(archDir)
+        ? readdirSync(archDir)
+            .filter((f) => f.endsWith('.md') && !f.startsWith('_'))
+            .sort()
+        : [];
+      if (!files.length) {
+        console.log(
+          'No architecture blueprints found in docs/architecture/. Create one with: node scripts/ticket.mjs blueprint "<Topic>" [--version <ver>]',
+        );
+        return;
+      }
+      console.log(`=== Architecture Blueprints (${files.length}) ===`);
+      for (const f of files) {
+        const text = readFileSync(join(archDir, f), 'utf8').replace(/\r\n/g, '\n');
+        const fm = text.match(/^---\n([\s\S]*?)\n---\n/);
+        const meta = {};
+        if (fm) {
+          for (const line of fm[1].split('\n')) {
+            const idx = line.indexOf(':');
+            if (idx > 0) meta[line.slice(0, idx).trim()] = line.slice(idx + 1).trim();
+          }
+        }
+        const heading = (text.match(/^#\s+(.+)$/m) || [])[1] || '';
+        const title = meta.title || heading || f;
+        const status = meta.status || 'active';
+        const verPart = meta.version ? ` | version: ${meta.version}` : '';
+        console.log(`- docs/architecture/${f} | status: ${status}${verPart} | ${title}`);
+      }
+      return;
+    }
+
+    const topic = rawTopic.replace(/^["']|["']$/g, '').trim();
+    const kebabTopic = topic
+      .replace(/[^a-zA-Z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '');
+    const filename = `${config.prefix}-Blueprint-${kebabTopic}.md`;
+    const relPath = join('docs', 'architecture', filename).replace(/\\/g, '/');
+    const fullPath = join(repoRoot, relPath);
+
+    if (existsSync(fullPath) && !opts.force) {
+      fail(`blueprint already exists: ${relPath} (pass --force to overwrite)`);
+    }
+
+    const version =
+      opts.version !== undefined
+        ? String(opts.version).replace(/^["']|["']$/g, '').trim()
+        : '';
+    const plannerModel = resolveRoleModel('planner');
+    const content = [
+      '---',
+      `title: Blueprint: ${topic}`,
+      'status: active',
+      ...(version ? [`version: ${version}`] : []),
+      ...(plannerModel ? [`plannerModel: ${plannerModel}`] : []),
+      `created: ${today()}`,
+      '---',
+      `# Architecture Blueprint: ${topic}`,
+      '',
+      '## Goal & Non-Goals',
+      '',
+      '<Problem statement, target architecture goals, and explicit non-goals.>',
+      '',
+      '## Architecture & Boundaries',
+      '',
+      '<Modules, layers, data flow, and ownership boundaries across components.>',
+      '',
+      '## Contracts & Invariants',
+      '',
+      '<Shared interfaces, schemas, invariants, and compatibility guarantees that all child PRs must preserve.>',
+      '',
+      '## PR Slice Breakdown',
+      '',
+      '1. <Slice 1 — vertical PR scope, key files, and `new "<Slice>" --blueprint ' + relPath + '`>',
+      '2. <Slice 2 — ...>',
+      '',
+      '## Living Updates & ADRs',
+      '',
+      '<Links to ADRs (`ticket.mjs adr`), evolved boundaries, and slice completion notes.>',
+    ].join('\n');
+
+    mkdirSync(dirname(fullPath), { recursive: true });
+    writeFileSync(fullPath, `${content}\n`, 'utf8');
+    console.log(`Created blueprint: ${relPath}`);
+  },
+
   async adr() {
     const rawTitle = opts.files[0] || opts.title || '';
     if (!rawTitle) {
@@ -5223,6 +5660,8 @@ const commands = {
 
       const searchDirs = [
         join(dir, 'docs', 'decisions'),
+        join(dir, 'docs', 'architecture'),
+        join(dir, 'docs', 'dev-workflow'),
         join(dir, 'docs', 'plans'),
         join(dir, 'docs', 'plans', 'archive'),
       ];
@@ -5238,7 +5677,7 @@ const commands = {
         return files;
       }
 
-      const files = searchDirs.flatMap(scanRecursive);
+      const files = [...new Set(searchDirs.flatMap(scanRecursive))];
       for (const f of files) {
         try {
           const content = readFileSync(f, 'utf8');
@@ -5254,6 +5693,8 @@ const commands = {
           const lines = content.split('\n');
           const relPath = relative(dir, f).replace(/\\/g, '/');
           const isAdr = relPath.startsWith('docs/decisions/');
+          const isBlueprint = relPath.startsWith('docs/architecture/');
+          const isDoc = relPath.startsWith('docs/dev-workflow/');
           const titleLine = lines.find((l) => /^#\s+/.test(l)) || '';
           const title = titleLine.replace(/^#\s+/, '').trim() || basename(f);
 
@@ -5271,7 +5712,7 @@ const commands = {
 
           results.push({
             repo: repoName,
-            type: isAdr ? 'ADR' : 'Plan',
+            type: isAdr ? 'ADR' : isBlueprint ? 'Blueprint' : isDoc ? 'Doc' : 'Plan',
             file: relPath,
             title,
             matches,
@@ -5303,51 +5744,80 @@ const commands = {
   },
 
   async archive() {
-    const plansDir = join(repoRoot, config.plansDir || 'docs/plans');
-    const plans = opts.files[0]
-      ? [readPlan(opts.files[0])]
-      : opts.all
-        ? allPlans()
-        : [resolveActivePlan()];
-
+    const dirs = opts.fleet ? getKnownRepoDirs() : [repoRoot];
     let count = 0;
-    for (const plan of plans) {
-      const isDone =
-        plan.meta.status === 'done' ||
-        plan.meta.status === 'shipped' ||
-        problems(plan, { requireTicket: false, ignoreReview: true }).length ===
-          0;
 
-      if (!isDone && !opts.force) {
-        console.warn(
-          `Skipping ${plan.rel}: plan has open items or is not marked done/shipped (use --force to archive anyway).`,
-        );
-        continue;
-      }
+    for (const dir of dirs) {
+      const repoCfg = dir === repoRoot ? config : readRepoConfig(dir);
+      const plansDirRel = repoCfg.plansDir || 'docs/plans';
+      const plansDir = join(dir, plansDirRel);
+      const plans = opts.files[0]
+        ? [readPlan(opts.files[0])]
+        : opts.all || opts.merged || opts.fleet
+          ? allPlans(dir, plansDirRel)
+          : [resolveActivePlan()];
 
-      const month = plan.meta.completedAt?.slice(0, 7) || today().slice(0, 7);
-      const archiveDir = join(plansDir, 'archive', month);
-      mkdirSync(archiveDir, { recursive: true });
+      for (const plan of plans) {
+        const status = (plan.meta.status || '').toLowerCase();
+        const { items } = findCheckboxes(plan.body);
+        const allClosed =
+          items.length > 0 &&
+          items.every(
+            (item) => item.isChecked || /\sdeferred:\s*\S/i.test(item.text),
+          );
 
-      const destFile = join(archiveDir, basename(plan.full));
-      const relDest = relative(repoRoot, destFile).replace(/\\/g, '/');
-
-      let moved = false;
-      try {
-        git(['mv', plan.rel, relDest]);
-        moved = true;
-      } catch {
-        try {
-          renameSync(plan.full, destFile);
-          moved = true;
-        } catch (e) {
-          console.error(`Failed to move ${plan.rel}: ${e.message}`);
+        if (opts.merged) {
+          const isMergedDone =
+            status === 'done' ||
+            status === 'completed' ||
+            localPlanStatusForDir(plan, dir, repoCfg) === 'done' ||
+            (status === 'shipped' && allClosed);
+          if (!isMergedDone) continue;
+        } else {
+          const isDone =
+            status === 'done' ||
+            status === 'completed' ||
+            status === 'shipped' ||
+            problems(plan, { requireTicket: false, ignoreReview: true, dir })
+              .length === 0;
+          if (!isDone && !opts.force) {
+            console.warn(
+              `Skipping ${plan.rel}: plan has open items or is not marked done/shipped (use --force to archive anyway).`,
+            );
+            continue;
+          }
         }
-      }
 
-      if (moved) {
-        console.log(`Archived: ${plan.rel} -> ${relDest}`);
-        count++;
+        const month = plan.meta.completedAt?.slice(0, 7) || today().slice(0, 7);
+        const archiveDir = join(plansDir, 'archive', month);
+        const destFile = join(archiveDir, basename(plan.full));
+        const relDest = relative(dir, destFile).replace(/\\/g, '/');
+        const prefix = opts.fleet ? `[${basename(dir)}] ` : '';
+
+        if (opts.dryRun) {
+          console.log(`[dry-run] Would archive: ${prefix}${plan.rel} -> ${relDest}`);
+          count++;
+          continue;
+        }
+
+        mkdirSync(archiveDir, { recursive: true });
+        let moved = false;
+        try {
+          git(['mv', plan.rel, relDest], { cwd: dir });
+          moved = true;
+        } catch {
+          try {
+            renameSync(plan.full, destFile);
+            moved = true;
+          } catch (e) {
+            console.error(`Failed to move ${prefix}${plan.rel}: ${e.message}`);
+          }
+        }
+
+        if (moved) {
+          console.log(`Archived: ${prefix}${plan.rel} -> ${relDest}`);
+          count++;
+        }
       }
     }
     console.log(`Archived ${count} plan(s).`);
@@ -5428,6 +5898,12 @@ const commands = {
       console.log(
         `Branch:    ${branch} (${dirty === 0 ? 'clean' : `${dirty} uncommitted file(s)`})`,
       );
+      const protectedList = repoCfg.protectedBranches || ['main', 'master', 'develop'];
+      if (protectedList.includes(branch) && dirty > 0) {
+        console.log(
+          `Warning:   Protected branch "${branch}" has ${dirty} uncommitted file(s)`,
+        );
+      }
       console.log(`Worktrees: ${wtCount}`);
       console.log(
         `Tracker:   ${tracker}${tracker === 'notion' ? ` (Token: ${hasToken ? 'present' : 'MISSING'})` : ' (offline mode)'}`,
@@ -6145,16 +6621,35 @@ const commands = {
         })
         : catalog.filter(active).map(({ plan }) => plan);
       if (!targetPlans.length) fail('no active or planned plans found to spawn in wave.');
-      console.log(`=== Wave Orchestration: Spawning ${targetPlans.length} Worktree(s) ===\n`);
-      const claimed = new Set();
+      const allKnown = scanPlansIncludingArchive(main.path);
+      const spawnablePlans = [];
       for (const plan of targetPlans) {
+        if (!opts.force && parseDependsOn(plan).length > 0) {
+          const depState = resolveDependencyState(plan, allKnown, main.path);
+          if (!depState.ready) {
+            const blockers = [...depState.missing, ...depState.unclosed];
+            console.log(
+              `Skipping ${plan.rel}: [blocked by: ${blockers.join(', ') || 'circular dependency'}]`,
+            );
+            continue;
+          }
+        }
+        spawnablePlans.push(plan);
+      }
+      if (!spawnablePlans.length) {
+        console.log('No unblocked plans ready to spawn in wave.');
+        return;
+      }
+      console.log(`=== Wave Orchestration: Spawning ${spawnablePlans.length} Worktree(s) ===\n`);
+      const claimed = new Set();
+      for (const plan of spawnablePlans) {
         if (worktreePlanClosed(plan)) fail(`cannot spawn a closed plan: ${plan.rel}`);
         const branch = planWorktreeBranch(plan);
         if (claimed.has(branch)) fail(`multiple plans claim worktree branch: ${branch}`);
         claimed.add(branch);
       }
       const allocations = [...entries];
-      for (const plan of targetPlans) {
+      for (const plan of spawnablePlans) {
         const branch = planWorktreeBranch(plan);
         const worktree = ensurePlanWorktree(allocations, branch, plan);
         if (!allocations.some((entry) => entry.branch === branch))
@@ -6165,8 +6660,8 @@ const commands = {
         if (!opts.dryRun)
           console.log(`  Builder brief: cd "${worktree.path}" && node scripts/ticket.mjs step --role builder\n`);
       }
-      if (opts.dryRun) return console.log(`[dry-run] ${targetPlans.length} worktree target(s).`);
-      return console.log(`Wave spawn complete: ${targetPlans.length} worktree(s) active.`);
+      if (opts.dryRun) return console.log(`[dry-run] ${spawnablePlans.length} worktree target(s).`);
+      return console.log(`Wave spawn complete: ${spawnablePlans.length} worktree(s) active.`);
     }
 
     if (opts.prune || opts.files[0] === 'prune') {
@@ -6342,7 +6837,13 @@ const commands = {
     const explicitDays = opts.days !== undefined;
     const days = explicitDays ? Math.max(0, parseInt(opts.days, 10) || 0) : 90;
     const dirs = opts.fleet ? getKnownRepoDirs() : [repoRoot];
-    const perRepo = dirs.map((d) => collectRepoStats(d, { days, filterDays: explicitDays }));
+    const perRepo = dirs.map((d) =>
+      collectRepoStats(d, {
+        days,
+        filterDays: explicitDays,
+        allOverlaps: Boolean(opts.allOverlaps),
+      }),
+    );
 
     if (perRepo.length === 1) {
       const s = perRepo[0];
@@ -6874,6 +7375,177 @@ const commands = {
         console.log(
           `  • [${p.releaseState}] ${p.rel} (${p.type}, impact: ${p.impact}) — ${p.shortTitle}`,
         );
+      }
+    }
+  },
+
+  async ready() {
+    if (opts.release) {
+      const plan = opts.files[0] ? readPlan(opts.files[0]) : resolveActivePlan();
+      delete plan.meta.claimedBy;
+      delete plan.meta.claimedAt;
+      writePlan(plan);
+      if (opts.json) {
+        console.log(JSON.stringify({ released: plan.rel }, null, 2));
+      } else {
+        console.log(`Released claim on ${plan.rel}`);
+      }
+      return;
+    }
+
+    const catalog = scanPlansIncludingArchive(repoRoot);
+    const activePlans = allPlans(repoRoot).filter(
+      (p) => !isPlanCompletedOrArchived(p, repoRoot, config),
+    );
+    const bpFilter = (opts.blueprint || '').replace(/\\/g, '/').trim();
+    const filtered = bpFilter
+      ? activePlans.filter((p) => {
+          const ref = (p.meta.blueprint || '').replace(/\\/g, '/').trim();
+          return ref && (ref === bpFilter || basename(ref) === basename(bpFilter));
+        })
+      : activePlans;
+
+    const prioRank = {
+      emergency: 5,
+      critical: 4,
+      high: 3,
+      medium: 2,
+      low: 1,
+    };
+    filtered.sort((a, b) => {
+      const pa = prioRank[(a.meta.priority || '').toLowerCase()] || 0;
+      const pb = prioRank[(b.meta.priority || '').toLowerCase()] || 0;
+      if (pb !== pa) return pb - pa;
+      return a.rel.localeCompare(b.rel);
+    });
+
+    const reqAgent = (opts.agent || process.env.AI_CLIENT || '').trim();
+    const readyList = [];
+    const blockedList = [];
+    const claimedList = [];
+
+    for (const p of filtered) {
+      const depState = resolveDependencyState(p, catalog, repoRoot);
+      const claimedBy = (p.meta.claimedBy || '').trim();
+      const item = {
+        plan: p.rel,
+        title: p.meta.title || basename(p.rel),
+        status: p.meta.status || 'draft',
+        priority: p.meta.priority || null,
+        blueprint: p.meta.blueprint || null,
+        dependsOn: parseDependsOn(p),
+        blockedBy: [...depState.missing, ...depState.unclosed],
+        cycle: depState.cycle,
+        claimedBy: claimedBy || null,
+        claimedAt: p.meta.claimedAt || null,
+      };
+      if (!depState.ready) {
+        blockedList.push(item);
+      } else if (
+        claimedBy &&
+        (!reqAgent || claimedBy.toLowerCase() !== reqAgent.toLowerCase())
+      ) {
+        claimedList.push(item);
+      } else {
+        readyList.push({ item, planObj: p });
+      }
+    }
+
+    if (opts.claim) {
+      if (!readyList.length) {
+        fail('no unblocked, unclaimed plans ready to claim');
+      }
+      const agent = reqAgent || 'Other';
+      const target = readyList[0].planObj;
+      const nowIso = new Date().toISOString();
+      target.meta.claimedBy = agent;
+      target.meta.claimedAt = nowIso;
+      writePlan(target);
+      if (opts.json) {
+        console.log(
+          JSON.stringify(
+            {
+              claimed: target.rel,
+              claimedBy: agent,
+              claimedAt: nowIso,
+            },
+            null,
+            2,
+          ),
+        );
+      } else {
+        console.log(`Claimed ${target.rel} for ${agent} (${nowIso})`);
+      }
+      return;
+    }
+
+    const payload = {
+      ready: readyList.map((r) => r.item),
+      blocked: blockedList,
+      claimed: claimedList,
+    };
+
+    if (opts.json) {
+      console.log(JSON.stringify(payload, null, 2));
+      return;
+    }
+
+    console.log(
+      `=== Ready Plan Queue (${payload.ready.length} ready, ${payload.blocked.length} blocked, ${payload.claimed.length} claimed) ===`,
+    );
+    if (payload.ready.length) {
+      console.log('\nReady:');
+      for (const r of payload.ready) {
+        const deps = r.dependsOn.length ? ` [deps: ${r.dependsOn.join(', ')}]` : '';
+        console.log(`  • ${r.plan} (${r.status}) — ${r.title}${deps}`);
+      }
+    }
+    if (payload.claimed.length) {
+      console.log('\nClaimed:');
+      for (const c of payload.claimed) {
+        console.log(`  • ${c.plan} [claimed by ${c.claimedBy}] — ${c.title}`);
+      }
+    }
+    if (payload.blocked.length) {
+      console.log('\nBlocked:');
+      for (const b of payload.blocked) {
+        const reason = b.cycle
+          ? 'circular dependency'
+          : b.blockedBy.join(', ');
+        console.log(`  • ${b.plan} [blocked by: ${reason}] — ${b.title}`);
+      }
+    }
+    if (!payload.ready.length && !payload.claimed.length && !payload.blocked.length) {
+      console.log('No open plans in queue.');
+    }
+  },
+
+  async map() {
+    const filter = (opts.files[0] || opts.filter || '').trim();
+    const maxFiles =
+      opts.max !== undefined ? Math.max(1, parseInt(opts.max, 10) || 40) : 40;
+    const mapData = collectRepoSymbolMap(repoRoot, { filter, maxFiles });
+
+    if (opts.json) {
+      console.log(JSON.stringify(mapData, null, 2));
+      return;
+    }
+
+    console.log(
+      `=== Repository Symbol Map: ${mapData.repo} (${mapData.shownFiles}/${mapData.totalMatchedFiles} files${filter ? `, filter: "${filter}"` : ''}) ===`,
+    );
+    if (!mapData.files.length) {
+      console.log('No matching source files found.');
+      return;
+    }
+    for (const f of mapData.files) {
+      console.log(`\n${f.file} (${f.lines} lines):`);
+      if (!f.symbols.length) {
+        console.log('  (no top-level symbols extracted)');
+        continue;
+      }
+      for (const sym of f.symbols) {
+        console.log(`  L${sym.line}: [${sym.kind}] ${sym.name}`);
       }
     }
   },

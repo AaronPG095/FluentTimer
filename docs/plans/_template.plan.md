@@ -8,13 +8,14 @@ due:
 appetite:
 version:
 impact:
+dependsOn:
 ---
 # <Title>
 
 <!--
 Copy to docs/plans/<PREFIX>-Plan-<Topic>-<YYYY-MM>.plan.md. Follow "Development process" in AGENTS.md.
 Title: <Plan|Debug|Ask> - <Type>: <Title>. Type is Feature, Bug, Refactor, Docs, Perf, Process or similar; the script adds the project prefix.
-Optional, set before `create` (leave empty if unsure): priority (emergency, critical, high, medium, low), state (quick, easy, flow), due (YYYY-MM-DD, only an explicit real deadline), appetite (S, M, or L — Shape Up diff budget), version (target release e.g. 1.2.0 or none), impact (none, patch, minor, major).
+Optional, set before `create` (leave empty if unsure): priority (emergency, critical, high, medium, low), state (quick, easy, flow), due (YYYY-MM-DD, only an explicit real deadline), appetite (S, M, or L — Shape Up diff budget), version (target release e.g. 1.2.0 or none), impact (none, patch, minor, major), blueprint (optional relative path to a `docs/architecture/*.md` blueprint for multi-PR initiatives).
 Creation starts To Do with Task Lane = Development and a stable Dev Ticket Key (plus Target Version when version is set), queries the key before creating, and leaves Focus Slot/Date blank. Preserve devTicketKey if renaming this plan; do not run concurrent creates for the same plan.
 Frontmatter is maintained by scripts/ticket.mjs: ticket, devTicketKey, status (draft -> planned -> in-progress -> shipped -> done), agent, branch, worktree, reviewedBy, reviewVerdict, pr, version, impact.
 Rules the check enforces:
