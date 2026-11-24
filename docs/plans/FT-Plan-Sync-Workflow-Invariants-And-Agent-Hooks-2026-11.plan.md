@@ -1,7 +1,7 @@
 ---
 title: Plan - Chore: Sync Workflow Invariants And Agent Hooks
 ticket: https://app.notion.com/p/FT-Plan-Chore-Sync-Workflow-Invariants-And-Agent-Hooks-4220b9c6786f81c1a5d2dcf58ce5f952
-status: in-progress
+status: shipped
 priority: 
 state: 
 due: 
@@ -18,6 +18,7 @@ reviewVerdict: pass
 reviewSession: df4fdd1e-7ea9-4f9b-a30d-71a89118daf7
 baseBranch: main
 reviewFingerprint: 226c7a8022cdb4cf45cfa1fe8e496ba66b00eb4ea7850f130ed7e613da338d4b
+pr: https://github.com/AaronPG095/FluentTimer/pull/14
 ---
 # Sync Workflow Invariants And Agent Hooks
 
