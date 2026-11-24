@@ -1,0 +1,3 @@
+scripts/** linguist-vendored
+.agents/** linguist-vendored
+.claude/** linguist-vendored
