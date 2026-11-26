@@ -1,6 +1,6 @@
 ---
 title: Plan - Process: AI Dev Workflow rollout
-ticket: https://app.notion.com/p/FT-Plan-Process-AI-Dev-Workflow-rollout-4150b9c6786f815fa48ad418457ef020
+ticket: (redacted)
 status: shipped
 devTicketKey: FT:FT-Plan-AI-Dev-Workflow-e58673fd9216-2026-11
 agent: Codex

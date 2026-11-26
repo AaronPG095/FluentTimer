@@ -1,6 +1,6 @@
 ---
 title: Plan - Chore: Sync Workflow Invariants And Agent Hooks
-ticket: https://app.notion.com/p/FT-Plan-Chore-Sync-Workflow-Invariants-And-Agent-Hooks-4220b9c6786f81c1a5d2dcf58ce5f952
+ticket: (redacted)
 status: shipped
 priority: 
 state: 

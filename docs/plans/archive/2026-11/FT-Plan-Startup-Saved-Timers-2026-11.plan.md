@@ -1,6 +1,6 @@
 ---
 title: Plan - Feature: Saved Timers Startup Staging and Auto-Start
-ticket: https://app.notion.com/p/FT-Plan-Feature-Saved-Timers-Startup-Staging-and-Auto-Start-4110b9c6786f817ab147d58a6b887e18
+ticket: (redacted)
 status: shipped
 agent: Gemini
 branch: feat/startup-saved-timers
