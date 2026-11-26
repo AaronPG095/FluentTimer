@@ -24,6 +24,7 @@
   "lifeAreaPageId": "31e0b9c6-786f-803b-ab1f-e92dd3e12580",
   "timeZone": "Europe/Berlin",
   "verify": {
+    "fast": "dotnet build tests/FluentTimer.Core.Tests -c Release --no-restore -v q --nologo",
     "test": "dotnet test tests/FluentTimer.Core.Tests -c Release",
     "full": "dotnet test tests/FluentTimer.Core.Tests -c Release"
   },
@@ -50,12 +51,7 @@
   "requireReview": true,
   "allowSelfReview": false,
   "invariants": {
-    "mirrorDirs": [
-      [
-        ".agents/skills",
-        ".claude/skills"
-      ]
-    ],
+    "mirrorDirs": [],
     "noSecretsPatterns": [
       "\\bntn_[A-Za-z0-9]{10,}",
       "\\bsecret_[A-Za-z0-9]{10,}",
@@ -66,5 +62,6 @@
       "scripts/ticket.test.mjs",
       "scripts/ticket.config.json"
     ]
-  }
+  },
+  "mode": "universal"
 }
