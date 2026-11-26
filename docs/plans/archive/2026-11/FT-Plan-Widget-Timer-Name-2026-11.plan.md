@@ -1,6 +1,6 @@
 ---
 title: Plan - Feature: Widget Timer Name Visibility Toggle
-ticket: https://app.notion.com/p/FT-Plan-Feature-Widget-Timer-Name-Visibility-Toggle-4110b9c6786f817eabbbff9516b451a2
+ticket: (redacted)
 status: shipped
 agent: Gemini
 branch: feat/widget-timer-name

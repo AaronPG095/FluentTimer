@@ -1,51 +1,10 @@
 name: Plan check
 
-# Every non-trivial PR carries a plan under docs/plans/ with a ticket, and every
-# checkbox in it is ticked or marked "deferred: <reason>". See "Development process" in AGENTS.md.
-# Trivial PRs: add the "no-plan" label.
-
 on:
   pull_request:
     branches: ["main"]
     types: [opened, synchronize, reopened, ready_for_review, labeled, unlabeled]
 
-permissions:
-  contents: read
-
 jobs:
   plan-check:
-    name: Plan is closed out
-    if: github.event.pull_request.draft == false
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-          persist-credentials: false
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: '22'
-
-      - name: Check changed plans
-        env:
-          NO_PLAN: ${{ contains(github.event.pull_request.labels.*.name, 'no-plan') && '1' || '' }}
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          git restore --source="$BASE_SHA" --worktree -- scripts/ticket.mjs scripts/ticket.config.json
-          node scripts/ticket.mjs ci-check --base "$BASE_SHA" --head "$HEAD_SHA"
-          git restore --source=HEAD --worktree -- scripts/ticket.mjs scripts/ticket.config.json
-
-      - name: Test ticket CLI (when modified)
-        env:
-          BASE_SHA: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-        run: |
-          if [ "$(node -e "try{const{execFileSync}=require('child_process');const c=JSON.parse(execFileSync('git',['show',process.env.BASE_SHA+':scripts/ticket.config.json'],{encoding:'utf8'}));console.log(c.ciSkipTicketTests===true?'skip':'run')}catch{console.log('run')}")" = "skip" ]; then
-            echo "Skipping ticket.test.mjs on CI (ciSkipTicketTests=true in base config)."
-          elif ! git diff --quiet "$BASE_SHA"..."$HEAD_SHA" -- scripts/ticket.mjs scripts/ticket.test.mjs; then
-            node --test scripts/ticket.test.mjs
-          else
-            echo "Skipping ticket.test.mjs (scripts/ticket.mjs and scripts/ticket.test.mjs unchanged)."
-          fi
+    uses: AaronPG095/AI-Dev-Workflow/.github/workflows/reusable-plan-check.yml@main

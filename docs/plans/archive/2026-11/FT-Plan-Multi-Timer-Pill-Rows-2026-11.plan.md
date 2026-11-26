@@ -1,6 +1,6 @@
 ---
 title: Plan - Feature: Multi-Timer Rows in Pill Widget
-ticket: https://app.notion.com/p/FT-Plan-Feature-Multi-Timer-Rows-in-Pill-Widget-4110b9c6786f8165b5c9e99131f160e8
+ticket: (redacted)
 status: shipped
 priority: medium
 state: flow

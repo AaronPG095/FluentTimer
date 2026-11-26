@@ -1,6 +1,6 @@
 ---
 title: Plan - Feature: Pinned Multi-Timer Widget List
-ticket: https://app.notion.com/p/FT-Plan-Feature-Pinned-Multi-Timer-Widget-List-4110b9c6786f81f99b22fb5b1053016d
+ticket: (redacted)
 status: shipped
 priority: medium
 state: quick
